@@ -195,9 +195,15 @@ data/CINIC*
 attack_objects/
 coco2017
 COCO
+examples/mia/llm_mia/wbc/cosmopedia-khanacademy-subset
 
 # Ignore outputs
 leakpro_output
+leakpro_output_*
+# Every `target_*` output directory under an llm_mia example (train_config.yaml's `run.log_dir`,
+# always target_<name>, and import_external_target.py's target_pythia_external) -- one pattern
+# covers ez-mia/ and wbc/ both, and any future one, with no NOTE needed to keep in sync.
+examples/mia/llm_mia/*/target_*/
 *.pth
 *.png
 nohup.out

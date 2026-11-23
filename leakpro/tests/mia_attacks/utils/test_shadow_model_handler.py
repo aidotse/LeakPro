@@ -9,7 +9,7 @@ import pickle
 import numpy as np
 from pytest import raises
 
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.schemas import EvalOutput, LossConfig, OptimizerConfig, ShadowModelConfig, ShadowModelTrainingSchema, TrainingOutput
 from leakpro.tests.constants import get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
@@ -327,3 +327,167 @@ def test_filter_rejects_shadow_models_from_different_population(image_handler: I
 
     assert all_indices == [0]
     assert filtered_indices == []
+
+
+def test_construct_balanced_assignments_respects_points_per_model(image_handler: ImageInputHandler) -> None:
+    """Every dataset must get exactly points_per_model points, with per-point counts balanced within 1."""
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    m, n = 100, 7
+    for fraction in [0.3, 0.5, 0.72, 1.0]:
+        points_per_model = int(m * fraction)
+        A = sm.construct_balanced_assignments(m, n, points_per_model=points_per_model)
+        assert A.shape == (n, m)
+        assert np.all(A.sum(axis=1) == points_per_model)
+        inclusion_counts = A.sum(axis=0)
+        assert inclusion_counts.max() - inclusion_counts.min() <= 1
+
+    # Default keeps the historical behavior of half the population per model
+    A = sm.construct_balanced_assignments(101, 4)
+    assert np.all(A.sum(axis=1) == 101 // 2)
+
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n, points_per_model=0)
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n, points_per_model=m + 1)
+
+
+def test_shadow_model_training_fraction_is_used_and_cached(
+    image_handler: ImageInputHandler,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Shadow models must train on training_fraction of the population and be reused for that fraction."""
+    shadow_config = ShadowModelConfig(**get_shadow_model_config())
+    image_handler.configs.shadow_model = shadow_config
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path / "attack_objects")
+    os.makedirs(sm.storage_path, exist_ok=True)
+    sm.attack_cache_folder_path = str(tmp_path / "attack_cache")
+    os.makedirs(sm.attack_cache_folder_path, exist_ok=True)
+
+    trained_sizes = []
+
+    def fake_train(data_loader, model, criterion, optimizer, epochs):
+        trained_sizes.append(len(data_loader.dataset))
+        return TrainingOutput(model=model, metrics=EvalOutput(accuracy=0.0, loss=0.0))
+
+    monkeypatch.setattr(image_handler, "train", fake_train)
+    monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
+    monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
+
+    population = image_handler.test_indices
+    training_fraction = 0.75
+    expected_size = int(len(population) * training_fraction)
+
+    sm.create_shadow_models(num_models=2, shadow_population=population, training_fraction=training_fraction)
+    assert trained_sizes == [expected_size, expected_size]
+
+    # Re-running with the same fraction must reuse the cached models, not retrain (issue #345)
+    sm.create_shadow_models(num_models=2, shadow_population=population, training_fraction=training_fraction)
+    assert trained_sizes == [expected_size, expected_size]
+
+
+def test_construct_balanced_assignments_extends_a_cached_design(image_handler: ImageInputHandler) -> None:
+    """Seeding with cached memberships must keep the union balanced, not start a second design."""
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    m, n_cached, n_new = 100, 3, 5
+    points_per_model = 40
+
+    cached = sm.construct_balanced_assignments(m, n_cached, points_per_model=points_per_model)
+    prior_counts = cached.sum(axis=0)
+
+    new = sm.construct_balanced_assignments(m, n_new, points_per_model=points_per_model,
+                                            prior_inclusion_counts=prior_counts)
+    assert new.shape == (n_new, m)
+    assert np.all(new.sum(axis=1) == points_per_model)
+
+    union_counts = np.concatenate([cached, new]).sum(axis=0)
+    assert union_counts.max() - union_counts.min() <= 1
+
+    # The seeded pass must prefer the points the cached models missed. With one cached model
+    # covering the first half, the next model is forced entirely onto the second half; an
+    # unseeded pass would have no reason to pick those five points.
+    prior = np.array([1] * 5 + [0] * 5)
+    forced = sm.construct_balanced_assignments(10, 1, points_per_model=5, prior_inclusion_counts=prior)
+    assert list(np.where(forced[0] == 1)[0]) == [5, 6, 7, 8, 9]
+
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n_new, points_per_model=points_per_model,
+                                          prior_inclusion_counts=np.zeros(m + 1))
+
+
+def test_create_shadow_models_rejects_degenerate_training_fraction(image_handler: ImageInputHandler, tmp_path) -> None:
+    """A fraction of 1 leaves no OUT models and a fraction of 0 leaves no training data."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path)
+
+    with raises(ValueError) as excinfo:
+        sm.create_shadow_models(num_models=2, shadow_population=image_handler.test_indices, training_fraction=1.0)
+    assert "no OUT reference models" in str(excinfo.value)
+
+    with raises(ValueError) as excinfo:
+        sm.create_shadow_models(num_models=2, shadow_population=image_handler.test_indices, training_fraction=0.0)
+    assert "at least 1 point" in str(excinfo.value)
+
+
+def test_resumed_run_extends_the_cached_assignment(
+    image_handler: ImageInputHandler,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Adding shadow models to a cached run must balance against the cached ones, not ignore them."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path / "attack_objects")
+    os.makedirs(sm.storage_path, exist_ok=True)
+    sm.attack_cache_folder_path = str(tmp_path / "attack_cache")
+    os.makedirs(sm.attack_cache_folder_path, exist_ok=True)
+
+    monkeypatch.setattr(
+        image_handler, "train",
+        lambda data_loader, model, criterion, optimizer, epochs: TrainingOutput(
+            model=model, metrics=EvalOutput(accuracy=0.0, loss=0.0)),
+    )
+    monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
+    monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
+
+    population = np.array(image_handler.test_indices)
+    fraction = 0.5
+
+    # First run stops after 2 models (the crash), second run asks for 4.
+    sm.create_shadow_models(num_models=2, shadow_population=population.tolist(), training_fraction=fraction)
+    indices = sm.create_shadow_models(num_models=4, shadow_population=population.tolist(), training_fraction=fraction)
+    assert len(indices) == 4
+
+    counts = sm.get_in_indices_mask(list(indices), population).sum(axis=1)
+    assert counts.max() - counts.min() <= 1
+
+
+def test_audit_points_with_reference_models_requires_the_needed_side() -> None:
+    """Offline scoring needs an OUT model per point, online needs both sides."""
+    # 3 shadow models, 4 audit points. Point 0 is in every model (no OUT), point 1 in none (no IN).
+    out_indices = np.array([
+        [False, True, True, False],
+        [False, True, False, True],
+        [False, True, True, True],
+    ])
+
+    offline_mask = audit_points_with_reference_models(out_indices, require_in_models=False)
+    assert list(offline_mask) == [False, True, True, True]
+
+    online_mask = audit_points_with_reference_models(out_indices, require_in_models=True)
+    assert list(online_mask) == [False, False, True, True]

@@ -55,6 +55,12 @@ This product includes software developed at Lindholmen Science Park AB
    Licensed under Apache-2.0 License.
    Source: https://github.com/Ouxiang-Li/Diff-MI
 
+9. WBC (Window-based Membership Inference)
+   Located in: examples/mia/llm_mia/prepare_json_subset.py (port of dataset/prep.py)
+   Copyright (c) 2025 Yuetian Chen.
+   Licensed under MIT License.
+   Source: https://github.com/Stry233/WBC
+
 ===============================================================================
 ==  Scientific Acknowledgments                                               ==
 ===============================================================================

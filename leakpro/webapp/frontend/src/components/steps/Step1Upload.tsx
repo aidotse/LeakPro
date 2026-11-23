@@ -431,7 +431,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
         }`}
     >
       <input type="file" className="hidden"
-        accept=".csv,.jsonl,.json,.parquet,.npy,.pkl,.pt,.pth"
+        accept=".npz,.csv,.jsonl,.json,.parquet,.npy,.pkl,.pt,.pth"
         onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
       <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-6">
         <span className="material-symbols-outlined text-3xl">{file ? "check_circle" : "upload_file"}</span>
@@ -445,7 +445,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
         ) : (
           <>
             <h3 className="text-xl font-bold mb-2">Drag and drop your file here</h3>
-            <p className="text-slate-500 dark:text-slate-200">CSV, JSONL, Parquet, .npy, .pkl, .pt — up to 2 GB</p>
+            <p className="text-slate-500 dark:text-slate-200">.npz, CSV, JSONL, Parquet, .npy, .pkl, .pt — up to 2 GB</p>
           </>
         )}
       </div>

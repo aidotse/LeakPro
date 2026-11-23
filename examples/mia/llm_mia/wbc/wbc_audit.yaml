@@ -1,0 +1,42 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# WBC against an externally-trained Pythia-2.8B checkpoint, matching the WBC paper's own reference
+# config as closely as this repo currently allows. Run `import_external_target.py` first to build
+# target_pythia_external/ and the data_path below from your checkpoint + JSON train/test files.
+
+audit:
+  random_seed: 42   # matches this WBC reference config
+  attack_type: mia
+  data_modality: text
+  output_dir: ./leakpro_output_wbc_pythia
+  attack_list:
+    - attack: wbc
+      window_lengths: [2, 3, 4, 6, 9, 13, 18, 25, 32, 40]   # the reference codebase's configs/example.yaml list, verbatim
+      aggregation: sign
+      batch_size: 1                      # matches the paper's config -- 2.8B params x 512 tokens
+      pad_token_id: 0                    # Pythia/GPT-NeoX: check your tokenizer's actual pad/eos id
+      n_bootstrap_samples: 100           # paper §5.1: "100 bootstrap runs"; its implementation note and
+                                          # the reference configs/example.yaml both say 10 -- 100 is what
+                                          # the paper says produced its own reported numbers, so kept here
+      references:
+        - source: pretrained
+          # Must be the same base checkpoint as train_config.yaml's train.model_name -- change both together.
+          pretrained_name_or_path: "EleutherAI/pythia-2.8b"
+          dtype: float32                 # reference `init_model` (utils.py) never forces a dtype on the
+                                          # reference model -- float32 is what a plain from_pretrained
+                                          # gives here; don't "fix" this to bfloat16 to match the target.
+
+target:
+  module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/
+  model_class: HFCausalLMWrapper
+  # Matches train_config.yaml's run.log_dir/data.data_path (prepare_target.py output).
+  # If you instead used import_external_target.py, point these at whatever --out-dir/--data-path
+  # you passed it there.
+  target_folder: ./target_pythia_full   # use run_audit.py --target ./target_pythia_lora to audit the LoRA target instead
+  data_path: ./data/pythia_cosmopedia_khanacademy_512.pkl
+
+shadow_model:
+
+distillation_model:

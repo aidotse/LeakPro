@@ -50,6 +50,30 @@ class _SafeUnpickler(pickle.Unpickler):
             return type(name, (_DatasetStub,), {"__qualname__": name})
 
 
+def load_dataset_file(path: str) -> Any:  # noqa: ANN401 - arbitrary user dataset object
+    """Load a dataset object from disk: joblib first, then a pickle that stubs missing classes.
+
+    joblib is tried first because it reads both plain pickles and joblib's own
+    format (which embeds NumPy arrays and is not plain-pickle readable). If both
+    loaders fail, the joblib error is chained so the real cause is visible instead
+    of the fallback's generic "invalid load key".
+    """
+    with open(path, "rb") as file:
+        try:
+            return joblib.load(file)
+        except Exception as joblib_error:
+            file.seek(0)
+            try:
+                obj = _SafeUnpickler(file).load()
+            except Exception as pickle_error:
+                raise RuntimeError(
+                    f"Could not load dataset file '{path}': joblib failed with {joblib_error!r}; "
+                    f"pickle fallback failed with {pickle_error!r}"
+                ) from joblib_error
+            logger.info("Loaded dataset via safe unpickler (missing module stub)")
+            return obj
+
+
 def _fix_bn_inplace(model: torch.nn.Module) -> None:
     """Replace BatchNorm layers with GroupNorm in-place (no clone/pickle needed)."""
     for name, module in list(model.named_children()):
@@ -92,26 +116,19 @@ class MIAHandler:
     def _load_population(self:Self) -> None:
         """Default implementation of the population loading."""
         try:
-            with open(self.configs.target.data_path, "rb") as file:
-                try:
-                    self.population = joblib.load(file)
-                except Exception:
-                    file.seek(0)
-                    self.population = _SafeUnpickler(file).load()
-                    logger.info("Loaded population via safe unpickler (missing module stub)")
-
-                try:
-                    self.population_size = len(self.population)
-                except TypeError as e:
-                    raise TypeError(
-                        f"The population file at '{self.configs.target.data_path}' is not compatible with the "
-                        f"current dataset handler. This usually means the .pkl was created with an older or "
-                        f"different handler class. Please regenerate the population file using your current "
-                        f"dataset_handler.py and re-upload it. Original error: {e}"
-                    ) from e
-                if not self._is_indexable(self.population):
-                    raise ValueError("Population dataset is not indexable.")
-                logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
+            self.population = load_dataset_file(self.configs.target.data_path)
+            try:
+                self.population_size = len(self.population)
+            except TypeError as e:
+                raise TypeError(
+                    f"The population file at '{self.configs.target.data_path}' is not compatible with the "
+                    f"current dataset handler. This usually means the .pkl was created with an older or "
+                    f"different handler class. Please regenerate the population file using your current "
+                    f"dataset_handler.py and re-upload it. Original error: {e}"
+                ) from e
+            if not self._is_indexable(self.population):
+                raise ValueError("Population dataset is not indexable.")
+            logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the population dataset at {self.configs.target.data_path}") from e
 

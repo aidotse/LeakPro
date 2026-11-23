@@ -1,0 +1,30 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+audit:
+  random_seed: 1337
+  attack_type: mia
+  data_modality: text
+  output_dir: ./leakpro_output_xsum
+  attack_list:
+    # Same attack/config shape as audit.yaml (WikiText) -- only target_folder/data_path below differ.
+    - attack: ez_mia
+      aggregation: ratio
+      batch_size: 16
+      pad_token_id: 50256               # GPT-2 has no pad token; eos is used and masked out
+      references:
+        - source: pretrained
+          # Must be the same base checkpoint as train_config_xsum.yaml's train.model_name.
+          pretrained_name_or_path: gpt2
+          dtype: float32
+
+target:
+  module_path: ../hf_wrapper.py
+  model_class: HFCausalLMWrapper
+  target_folder: ./target_xsum_full     # matches train_config_xsum.yaml's run.log_dir
+  data_path: ./data/xsum_gpt2_128.pkl
+
+shadow_model:
+
+distillation_model:

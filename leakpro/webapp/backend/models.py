@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from leakpro.risk.schemas import UseCaseProfile
+
 
 # ---------------------------------------------------------------------------
 # Job state
@@ -113,6 +115,8 @@ class CompatResult(BaseModel):
     param_count: int | None = None
     error: str | None = None
     sample_outputs: list[dict] | None = None
+    # Why sample_outputs is missing although the model loaded (logged server-side too).
+    sample_error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +145,9 @@ class AttackResult(BaseModel):
     tpr: list[float] | None = None
     signal_values: list[float] | None = None
     true_labels: list[int] | None = None
+    # Population index of each entry in signal_values / true_labels, so the UI can
+    # fetch the right sample; None when the attack's audit set cannot be mapped.
+    audit_indices: list[int] | None = None
 
 
 class JobListItem(BaseModel):
@@ -161,4 +168,33 @@ class ModelResult(BaseModel):
     model_class: str | None = None   # e.g. "ResNet18_DPsgd"
     job_id: str | None = None        # originating job, used for sample image URLs
     train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
+    num_train: int | None = None     # target training-set size, used to scale risk to the population
     attacks: list[AttackResult] = []
+    # str(alpha) -> {"measured": MiaVulnerability, "skipped": [...], "below_chance": [...]} or
+    # {"error": reason}. Derived by
+    # leakpro.risk.measure_strongest when the results are served, never stored with the job.
+    measured: dict[str, dict] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Risk assessment — see leakpro/risk/. All scoring happens in the library; the
+# frontend posts a use-case profile and renders whatever comes back.
+# ---------------------------------------------------------------------------
+
+class RiskRequest(UseCaseProfile):
+    """A use-case profile plus the model it applies to.
+
+    Inherits every field, default and bound from leakpro.risk.schemas.UseCaseProfile, including
+    ``extra="forbid"``, so there is exactly one definition of a valid profile and an invalid one is
+    rejected with a 422 before the endpoint runs.
+    """
+
+    model_name: str | None = None    # None assesses every model in the job
+
+
+class RiskResponse(BaseModel):
+    """One assessment per model, plus any model that could not be assessed and why."""
+
+    job_id: str
+    assessments: dict[str, dict] = {}   # model_name -> RiskAssessment.model_dump()
+    unassessable: dict[str, str] = {}   # model_name -> reason

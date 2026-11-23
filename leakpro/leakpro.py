@@ -65,6 +65,10 @@ class LeakPro:
             if model_handler is not None:
                 assert issubclass(model_handler, AbstractInputHandler), "model_handler must be a subclass of AbstractInputHandler"
 
+        # Deployment context for risk assessment, when declared in the config. Nothing is computed
+        # here: pass it to leakpro.risk.assess_risk together with the results of run_audit().
+        self.use_case_profile = configs.use_case
+
         # Create report directory
         self.report_dir = f"{configs.audit.output_dir}/results"
         Path(self.report_dir).mkdir(parents=True, exist_ok=True)

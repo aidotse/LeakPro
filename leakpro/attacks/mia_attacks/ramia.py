@@ -54,7 +54,7 @@ class AttackRaMIA(AbstractMIA):
         # parameters used for the MIA attack
         online: bool = Field(default=False, description="Online vs offline attack")
         num_shadow_models: int = Field(default=2, ge=2, description="Number of shadow models")
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Part of available attack data to use for shadow models. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
 
     def __init__(self:Self,
                  handler: MIAHandler,
@@ -304,7 +304,7 @@ class AttackRaMIA(AbstractMIA):
         hash_config = {"augment_strength": self.augment_strength,
                        "num_transforms": self.num_transforms,
                        "n_ops": self.n_ops}
-        hash_str = hash_attack(hash_config, AbstractMIA.handler.target_model)
+        hash_str = hash_attack(hash_config, self.handler.target_model)
 
         if os.path.exists(f"{augmented_data_dir}/{hash_str}"):
             logger.info("Loading existing augmented data...")
