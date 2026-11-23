@@ -28,6 +28,11 @@ EARLY = 10
 ITERATE_TOL = {"rtol": 1e-3, "atol": 1e-4}
 EARLY_LOSS_RTOL = 1e-4
 LBFGS_COMPARABLE_STEPS = 2   # iterates z_0..z_2 and losses L_0..L_3
+# Adam cases whose tail is not comparable either: perturbing z_0 by 1e-6 relative forks the framework's own trajectory
+# (traj-dimitrov, Adam at lr=1.0: losses agree to 2e-5 up to L_19, then differ by about 5% from L_20 on, so whether CI
+# passed depended on the runner's CPU). huang and inverting_gradients stay within 1e-5 under the same perturbation.
+# Only the early window is compared for these.
+UNSTABLE_TAIL = {"traj-dimitrov"}
 
 
 class _Trajectory(Callback):
@@ -59,13 +64,13 @@ def test_trajectory_matches_v1(case_name: str) -> None:
     for k, t in enumerate(fx["steps"]):
         if t <= last_step:
             torch.testing.assert_close(ours.iterates[t], case.to_current_layout(fx["iterates"][k]), **ITERATE_TOL,
-                                       msg=f"iterate z_{t}")
+                                       msg=lambda m, t=t: f"iterate z_{t}\n{m}")
     n_early = last_step + 1 if lbfgs else EARLY + 1
     torch.testing.assert_close(torch.tensor(ours.losses[:n_early]), torch.tensor(fx["losses"][:n_early]),
-                               rtol=EARLY_LOSS_RTOL, atol=0.0, msg="early losses")
-    if not lbfgs:
+                               rtol=EARLY_LOSS_RTOL, atol=0.0, msg=lambda m: f"early losses\n{m}")
+    if not lbfgs and case_name not in UNSTABLE_TAIL:
         torch.testing.assert_close(torch.tensor(ours.losses), torch.tensor(fx["losses"]), rtol=1e-3, atol=0.0,
-                                   msg="loss trajectory")
+                                   msg=lambda m: f"loss trajectory\n{m}")
 
 
 def test_stg_matches_v1_with_v1_defects_replicated() -> None:
