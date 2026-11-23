@@ -699,6 +699,22 @@ def test_offline_rmia_preserves_float32_marginal_at_strict_threshold(handler):
         attack._compute_scores(target, references, np.zeros_like(out), np.array([[1.0]]))
 
 
+def test_base_preserves_reference_precision_with_float64_target(handler, monkeypatch):
+    handler.train_indices = np.array([0])
+    handler.test_indices = np.array([2])
+    attack = AttackFactoryMIA.create_attack("base", {"num_shadow_models": 2, "online": True}, handler)
+    attack.shadow_model_indices = [0, 1]
+    target = np.zeros((2, 2), dtype=np.float64)
+    shadows = np.float32([[[-1.1629938, 1.3407788], [-1.6744486, 1.6617432]],
+                          [[-1.3391861, 1.5049195], [-0.5902862, 1.6495398]]])
+    monkeypatch.setattr(ShadowModelHandler(), "load_logits",
+                        lambda name=None, indx=None: target if indx is None else shadows[indx])
+    labels = np.array([0, 0])
+    reference = np.array([attack._log_conf(row, labels) for row in shadows])
+    expected = attack._log_conf(target, labels) - (logsumexp(reference, axis=0) - np.log(2))
+    np.testing.assert_array_equal(attack.run_attack().signal_values, expected)
+
+
 def test_changed_population_uses_fresh_audit_directory(handler, mocker, tmp_path):
     from copy import copy
     from leakpro.signals.signal import ModelLogits

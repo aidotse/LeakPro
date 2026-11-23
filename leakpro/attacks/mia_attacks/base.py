@@ -199,7 +199,7 @@ class AttackBASE(AbstractMIA):
         logger.info(attack_info)
 
         signals = self._get_cached_signals()
-        score = self._score_signals(signals[0], signals[1:], self.out_indices if not self.online else None)
+        score = self._score_signals(signals[0], np.asarray(signals[1:]), self.out_indices if not self.online else None)
 
         # pick out the in-members and out-members signals
         in_members = self.audit_dataset["in_members"]
@@ -218,22 +218,13 @@ class AttackBASE(AbstractMIA):
                                     metadata=self.configs.model_dump(),
                                     audit_indices=self.scored_population_indices())
 
-    def _get_cached_signals(self) -> np.ndarray:
-        """Read target and shadow log-confidence values in the cached audit-record order."""
-        # Load the logits for the target model and shadow models
-        ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        logits_target = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-        logits_shadow_models = []
-        for indx in self.shadow_model_indices:
-            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
-
-        # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
-
-        # run points through shadow models and collect the log confidence values
-        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_shadow_models])
-
-        return np.concatenate((log_conf_target[None], log_conf_shadow_models))
+    def _get_cached_signals(self) -> list[np.ndarray]:
+        """Keep each model's native precision until its role in the evaluation is known."""
+        pool = ShadowModelHandler()
+        labels = self.handler.get_labels(self.audit_dataset["data"])
+        target = pool.load_logits(name=f"target_{pool.target_model_hash}")
+        return [self._log_conf(target, labels),
+                *[self._log_conf(pool.load_logits(indx=index), labels) for index in self.shadow_model_indices]]
 
     def _score_signals(self, log_conf_target: np.ndarray, log_conf_shadow_models: np.ndarray,
                        out_indices: np.ndarray) -> np.ndarray:
@@ -267,8 +258,9 @@ class AttackBASE(AbstractMIA):
 
         def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
             for target, references in references_by_target.items():
-                scores = self._score_signals(signals[target], signals[references], ~membership[references])
-                yield target, references, scores, np.ones(signals.shape[1], dtype=bool)
+                reference_signals = np.asarray([signals[index] for index in references])
+                scores = self._score_signals(signals[target], reference_signals, ~membership[references])
+                yield target, references, scores, np.ones(len(scores), dtype=bool)
 
-        return save_robustness_results(self, {"audit": signals}, membership, training_sizes,
+        return save_robustness_results(self, {str(i): row for i, row in enumerate(signals)}, membership, training_sizes,
                                        references_by_target, rotations(), seed, output_dir)
