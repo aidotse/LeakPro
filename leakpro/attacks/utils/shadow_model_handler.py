@@ -28,9 +28,12 @@ from leakpro.utils.seed import seed_everything
 def singleton(cls):  # noqa: ANN001, ANN201
     """Decorator to create a singleton with initialization parameters."""
     instances = {}
+    params = {}
 
     def get_instance(*args, **kwargs):  # noqa: ANN003, ANN002, ANN202
         if cls not in instances:
+            # Store the initialization parameters when the singleton is first created
+            params[cls] = (args, kwargs)
             instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
             # Call init again to update states such as model path, target hash etc
@@ -42,7 +45,8 @@ def singleton(cls):  # noqa: ANN001, ANN201
 
     def delete_instance() -> None:
         """Delete the singleton instance (for resetting or testing purposes)."""
-        instances.pop(cls, None)
+        if cls in instances:
+            del instances[cls]
 
     # Attach methods to the class
     get_instance.is_created = is_created

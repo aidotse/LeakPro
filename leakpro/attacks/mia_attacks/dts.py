@@ -17,12 +17,13 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset, TensorDataset
+from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.dts_mia_classifier.mi_classifier import MIClassifier
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.mia_handler import MIAHandler, ordered_query_dataloader
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -130,7 +131,8 @@ class AttackDTS(AbstractMIA):
             # Randomly select specified fraction of indices from shadow population
             data_size = int(len(self.attack_data_indices)*self.clf_data_fraction)
             data_indices = np.random.choice(self.attack_data_indices, data_size, replace=False)
-            data_loader = ordered_query_dataloader(self.handler.get_dataloader, data_indices, batch_size=self.clf_batch_size)
+            data_loader = self.handler.get_dataloader(data_indices, batch_size=self.clf_batch_size, shuffle=False)
+            assert isinstance(data_loader.sampler, SequentialSampler), "DataLoader must not shuffle data to maintain order of indices"  # noqa: E501
 
             # Inference and MIC data collection
             with torch.no_grad():
@@ -152,9 +154,8 @@ class AttackDTS(AbstractMIA):
         """Get the MIC features from the target model on the audit set."""
         mic_features = []
 
-        data_loader = ordered_query_dataloader(
-            self.handler.get_dataloader, self.audit_data_indices, batch_size=self.clf_batch_size
-        )
+        data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=self.clf_batch_size, shuffle=False)
+        assert isinstance(data_loader.sampler, SequentialSampler), "DataLoader must not shuffle data to maintain order of indices"
 
         # Forecast entire audit set and get the pred respectively target time series as MIC features
         with torch.no_grad():
@@ -270,11 +271,9 @@ class AttackDTS(AbstractMIA):
 
         # Combine all signal values for further analysis
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
-        score_rows = np.concatenate((self.in_members, self.out_members))
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signal_values,
                                           result_name="DTS",
-                                          metadata=self.configs.model_dump(),
-                                          audit_indices=self.audit_data_indices[score_rows])
+                                          metadata=self.configs.model_dump())

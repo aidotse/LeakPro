@@ -71,8 +71,7 @@ class MIAResult:
                               signal_values: list,
                               thresholds: list,
                               result_name: str = None,
-                              metadata: dict = None,
-                              audit_indices: list = None) -> Self:
+                              metadata: dict = None) -> Self:
         """Create MIAResult from fixed threshold scores.
 
         Args:
@@ -82,7 +81,6 @@ class MIAResult:
             thresholds: A list of fixed thresholds at which to evaluate confusion values.
             result_name: The name of the attack and result.
             metadata: Metadata about the result.
-            audit_indices: Population index of each score, in the same order.
 
         Returns:
         -------
@@ -95,7 +93,6 @@ class MIAResult:
         obj._init_common(true_membership, result_name, metadata)
         obj.roc_mode = "fixed"
         obj.signal_values = np.ravel(signal_values)
-        obj.audit_indices = obj._validate_audit_indices(audit_indices)
         obj._compute_fixed_threshold_confusions(thresholds)
         obj._compute_metrics()
         obj.result = obj._make_result_object()

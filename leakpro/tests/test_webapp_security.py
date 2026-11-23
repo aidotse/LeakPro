@@ -51,15 +51,14 @@ class TestPathValidation:
         from leakpro.webapp.backend.security import confine
 
         with tempfile.TemporaryDirectory() as root:
-            roots = [Path(root).resolve()]
-            inside = roots[0] / "data.pkl"
+            inside = Path(root) / "data.pkl"
             inside.write_bytes(b"x")
-            assert confine(str(inside), roots) == inside
+            assert confine(str(inside), [Path(root)]) == inside.resolve()
 
             with pytest.raises(HTTPException):
-                confine("/etc/passwd", roots)
+                confine("/etc/passwd", [Path(root)])
             with pytest.raises(HTTPException):
-                confine(f"{root}/../../etc/passwd", roots)
+                confine(f"{root}/../../etc/passwd", [Path(root)])
 
     def test_safe_suffix_ignores_hostile_filenames(self: Self) -> None:
         """Only a plain extension is ever taken from a client filename."""

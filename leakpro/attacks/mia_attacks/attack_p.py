@@ -126,6 +126,5 @@ class AttackP(AbstractMIA):
             true_membership = true_labels,
             signal_values = audit_signal,
             result_name = "P-attack",
-            metadata=self.configs.model_dump(),
-            audit_indices=self.scored_population_indices(),
+            metadata=self.configs.model_dump()
         )

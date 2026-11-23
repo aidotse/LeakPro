@@ -24,7 +24,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.input_handler.mia_handler import MIAHandler, ordered_query_dataloader
 from leakpro.reporting.mia_result import MIAResult
-from leakpro.signals.signal_extractor import PytorchModel, align_loss_targets
+from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -198,26 +198,30 @@ class AttackRAPID(AbstractMIA):
         if not torch.isfinite(logits).all():
             raise ValueError("RAPID received non-finite model logits.")
         if logits.shape[1] == 1:
-            labels = align_loss_targets(logits, labels, nn.BCEWithLogitsLoss)
-            if labels.shape != logits.shape or not torch.all((labels >= 0) & (labels <= 1)):
+            labels = labels.to(logits)
+            if labels.numel() != logits.numel() or not torch.all((labels >= 0) & (labels <= 1)):
                 raise ValueError("RAPID requires binary labels in [0, 1] for single-logit models.")
-            loss = binary_cross_entropy_with_logits(logits, labels, reduction="none").reshape(-1)
+            loss = binary_cross_entropy_with_logits(logits, labels.reshape_as(logits), reduction="none").reshape(-1)
         else:
-            labels = align_loss_targets(logits, labels, nn.CrossEntropyLoss)
-            if labels.shape == logits.shape and labels.is_floating_point():
-                if not torch.all((labels >= 0) & (labels <= 1)) or not torch.allclose(
-                    labels.sum(dim=1), torch.ones_like(labels[:, 0])
-                ):
-                    raise ValueError("RAPID requires class probabilities that sum to one per sample.")
-                labels = labels.to(logits.dtype)
-            elif labels.ndim != 1 or not torch.all((labels == labels.long()) & (labels >= 0) & (labels < logits.shape[1])):
-                raise ValueError("RAPID requires integer class labels within the model's class range.")
-            else:
-                labels = labels.long()
-            loss = cross_entropy(logits, labels, reduction="none")
+            loss = cross_entropy(logits, AttackRAPID._multiclass_targets(logits, labels), reduction="none")
         if not torch.isfinite(loss).all():
             raise ValueError("RAPID received non-finite classification losses.")
         return loss.numpy()
+
+    @staticmethod
+    def _multiclass_targets(logits:torch.Tensor, labels:torch.Tensor) -> torch.Tensor:
+        """Validate class IDs or soft targets for cross-entropy."""
+        if labels.shape == (len(logits), 1):
+            labels = labels.squeeze(1)
+        if labels.shape == logits.shape and labels.is_floating_point():
+            if not torch.all((labels >= 0) & (labels <= 1)) or not torch.allclose(
+                labels.sum(dim=1), torch.ones_like(labels[:, 0])
+            ):
+                raise ValueError("RAPID requires class probabilities that sum to one per sample.")
+            return labels.to(logits.dtype)
+        if labels.ndim != 1 or not torch.all((labels == labels.long()) & (labels >= 0) & (labels < logits.shape[1])):
+            raise ValueError("RAPID requires integer class labels within the model's class range.")
+        return labels.long()
 
     def _get_mia_features(self: Self, model: PytorchModel, references: list[PytorchModel], indices: np.ndarray) -> np.ndarray:
         """Calibrate the audited model's losses against the full reference pool."""

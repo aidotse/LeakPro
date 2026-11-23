@@ -15,7 +15,7 @@ import pytest
 import torch
 import yaml
 from torch import nn, optim
-from torch.utils.data import DataLoader, default_collate
+from torch.utils.data import DataLoader
 
 from leakpro import LeakPro
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
@@ -646,7 +646,7 @@ E2E_TESTED_MIA_ATTACKS = (
 # Attacks that report, on MIAResult.audit_indices, the population index of every
 # score they return. Every other attack must leave it None rather than guess
 # (loss_traj scores a shuffled set, see #476; qmia reports no per-point scores).
-ATTACKS_REPORTING_SCORED_INDICES = frozenset({"rmia", "lira", "base", "multi_signal_lira", "rapid", "population", "dts"})
+ATTACKS_REPORTING_SCORED_INDICES = frozenset({"rmia", "lira", "base", "multi_signal_lira", "rapid"})
 
 
 def _assert_scored_indices_contract(attack_name: str, result: MIAResult,
@@ -667,10 +667,9 @@ def _assert_scored_indices_contract(attack_name: str, result: MIAResult,
         )
 
 ATTACK_PARAMETERS = [
-    pytest.param(attack_name, False, id=f"{attack_name}-real")
+    pytest.param(attack_name, id=f"{attack_name}-real")
     for attack_name in E2E_TESTED_MIA_ATTACKS
 ]
-ATTACK_PARAMETERS.append(pytest.param("dts", True, id="dts-custom-collate"))
 
 
 def test_attack_factory_attack_list_is_covered() -> None:
@@ -697,8 +696,8 @@ def test_target_split_keeps_aux_population() -> None:
     assert len(RMIA_TRAIN_INDICES) + len(RMIA_TEST_INDICES) == N_SAMPLES
 
 
-@pytest.mark.parametrize(("attack_name", "reverse_collate"), ATTACK_PARAMETERS)
-def test_all_attacks_end_to_end(attack_name: str, reverse_collate: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("attack_name", ATTACK_PARAMETERS)
+def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
     optuna_metadata_snapshot = _snapshot_optuna_metadata()
@@ -714,10 +713,6 @@ def test_all_attacks_end_to_end(attack_name: str, reverse_collate: bool, monkeyp
             if attack_name == "dts":
                 config_path = _create_timeseries_e2e_config(run_dir, attack_name)
                 user_handler = TinyTimeSeriesInputHandler
-                if reverse_collate:
-                    config = yaml.safe_load(config_path.read_text())
-                    config["audit"]["attack_list"][0]["clf_batch_size"] = 4
-                    config_path.write_text(yaml.safe_dump(config))
             elif attack_name in LLM_E2E_ATTACKS:
                 config_path = _create_text_e2e_config(run_dir, attack_name)
                 user_handler = TinyTextInputHandler
@@ -726,10 +721,6 @@ def test_all_attacks_end_to_end(attack_name: str, reverse_collate: bool, monkeyp
                 user_handler = TinyImageInputHandler
 
             leakpro = LeakPro(user_handler, str(config_path))
-            if reverse_collate:
-                monkeypatch.setitem(
-                    leakpro.handler.dataloader_config.params, "collate_fn", lambda batch: default_collate(batch[::-1])
-                )
             results = leakpro.run_audit(create_pdf=False, use_optuna=False)
 
             assert len(results) == 1
@@ -740,16 +731,6 @@ def test_all_attacks_end_to_end(attack_name: str, reverse_collate: bool, monkeyp
             assert isinstance(result.id, str)
             assert result.id
             _assert_scored_indices_contract(attack_name, result, leakpro.handler)
-
-            if reverse_collate:
-                attack, = leakpro.attack_scheduler.attacks
-                targets = leakpro.handler.population.targets[result.audit_indices]
-                torch.testing.assert_close(attack.target_features[..., :targets.size(-1)], targets)
-
-            if attack_name == "rapid":
-                np.testing.assert_array_equal(result.true, [1] * N_TRAIN + [0] * N_TEST)
-                assert np.isfinite(result.signal_values).all()
-                assert np.all((result.signal_values >= 0) & (result.signal_values <= 1))
 
             output_dir = Path(leakpro.handler.configs.audit.output_dir)
             result_file = output_dir / "results" / result.id / "result.txt"

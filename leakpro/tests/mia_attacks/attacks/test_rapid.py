@@ -570,19 +570,14 @@ def test_losses_preserve_handler_outputs(monkeypatch: pytest.MonkeyPatch, scenar
     np.testing.assert_allclose(values, np.column_stack((original, original - reference_loss)), rtol=1e-6, atol=1e-7)
 
 
-@pytest.mark.parametrize("attack_name", ["rapid", "population"])
 def test_custom_collation_preserves_record_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attack_name: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A collate function that reverses batches must preserve each score's record ID."""
     audit = create_audit(tmp_path, monkeypatch)
     audit.handler.population.augment = None
     audit.handler.dataloader_config.params["collate_fn"] = lambda batch: default_collate(batch[::-1])
-    scheduler = audit.attack_scheduler
-    if attack_name == "population":
-        scheduler.attacks[:] = [AttackFactoryMIA.create_attack(attack_name, {}, audit.handler)]
-        scheduler.attack_names[:] = [attack_name]
-    attack = scheduler.attacks[0]
+    attack, = audit.attack_scheduler.attacks
 
     result, = audit.run_audit(create_pdf=False, use_optuna=False)
 
@@ -592,10 +587,7 @@ def test_custom_collation_preserves_record_identity(
     logits = attack.target_model.get_logits(inputs)
     labels = attack.population.targets[ids].numpy().reshape(-1)
     expected = logsumexp(logits, axis=1) - logits[np.arange(len(ids)), labels]
-    if isinstance(attack, AttackRAPID):
-        np.testing.assert_allclose(attack.signal_data[:, 0], expected, rtol=1e-6, atol=3e-7)
-    else:
-        np.testing.assert_allclose(result.signal_values, expected, rtol=1e-6, atol=3e-7)
+    np.testing.assert_allclose(attack.signal_data[:, 0], expected, rtol=1e-6, atol=3e-7)
 
 
 @pytest.mark.parametrize(("labels", "logits", "error"), [

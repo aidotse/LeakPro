@@ -14,7 +14,6 @@ from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.input_handler.mia_handler import ordered_query_dataloader
 from leakpro.signals.signal_extractor import Model
 from leakpro.signals.utils.dtw import mv_dtw_distance
 from leakpro.signals.utils.get_TS2Vec import get_ts2vec_model
@@ -181,7 +180,8 @@ class ModelLoss(Signal):
 
         """
         # Compute the signal for each model
-        data_loader = ordered_query_dataloader(handler.get_dataloader, indices)
+        data_loader = handler.get_dataloader(indices, shuffle=False)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
         for m, model in enumerate(models):

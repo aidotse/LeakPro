@@ -23,10 +23,10 @@ from leakpro.utils.import_helper import Self
     [17.9, 4.2], [True, 4], [-1, 4], np.array([2**63, 4], dtype=np.uint64),
     [np.timedelta64(17, "ns"), 4], np.array([17, 4], dtype="timedelta64[ns]"),
 ])
-def test_fixed_threshold_scores_reject_invalid_audit_indices(ids: list | np.ndarray) -> None:
+def test_full_scores_reject_invalid_audit_indices(ids: list | np.ndarray) -> None:
     """Only nonnegative integers can identify population records."""
     with pytest.raises(ValueError, match="nonnegative integer population indices"):
-        MIAResult.from_fixed_thresholds([1, 0], [0.7, 0.2], [0.5], result_name="source", audit_indices=ids)
+        MIAResult.from_full_scores([1, 0], [0.7, 0.2], result_name="source", audit_indices=ids)
 
 
 def test_audit_indices_are_copied_from_the_caller() -> None:
