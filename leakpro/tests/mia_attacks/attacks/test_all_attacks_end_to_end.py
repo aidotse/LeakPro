@@ -467,6 +467,11 @@ def _build_attack_config(attack_name: str) -> dict:
         candidate["input_size"] = max(candidate.get("input_size", 5), 5)
         candidate["train_mia_batch_size"] = max(candidate.get("train_mia_batch_size", 2), 2)
 
+    if attack_name == "rapid":
+        candidate.update(shadow_data_fraction=0.5, training_data_fraction=0.5,
+                         num_reference_models=2, query_num=2, mia_classifier_patience=2,
+                         learning_rate=0.0002, random_seed=1234)
+
     if attack_name == "oslo":
         # Keep a valid positive threshold range and an even post-audit pool size
         # to satisfy current balanced shadow assignment assumptions.
@@ -635,12 +640,13 @@ E2E_TESTED_MIA_ATTACKS = (
     "oslo",
     "ez_mia",
     "wbc",
+    "rapid",
 )
 
 # Attacks that report, on MIAResult.audit_indices, the population index of every
 # score they return. Every other attack must leave it None rather than guess
 # (loss_traj scores a shuffled set, see #476; qmia reports no per-point scores).
-ATTACKS_REPORTING_SCORED_INDICES = frozenset({"rmia", "lira", "base", "multi_signal_lira"})
+ATTACKS_REPORTING_SCORED_INDICES = frozenset({"rmia", "lira", "base", "multi_signal_lira", "rapid"})
 
 
 def _assert_scored_indices_contract(attack_name: str, result: MIAResult,

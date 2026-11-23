@@ -31,7 +31,9 @@ class ModelHandler():
     def __init__(
         self:Self,
         handler: MIAHandler,
-        caller:str=None
+        caller:str=None,
+        *,
+        precompute_logits:bool=True,
     )->None:
         """Initialize the ModelHandler class."""
 
@@ -64,16 +66,15 @@ class ModelHandler():
         # Create the hash for the target model weights
         self.target_model_hash = hash_model(self.handler.target_model)
 
-        # Create the hash for the data split — order-sensitive so logit row order is always valid
-        self.population_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
-
-        # Folder to store intermediate results — scoped to the job/model so stale
-        # logits from a previous run never bleed into a new one.
-        self.attack_cache_folder_path = f"{storage_path}/attack_cache"
+        # Bind the split IDs to the population they index.
+        split_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
+        self.population_hash = f"{handler.population_digest}_{split_hash}"
+        self.attack_cache_folder_path = f"{storage_path}/attack_cache/{self.population_hash}"
         os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
-        criterion = self.handler.get_criterion()
-        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=f"target_{self.target_model_hash}")
+        if precompute_logits:
+            criterion = self.handler.get_criterion()
+            self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=f"target_{self.target_model_hash}")
 
     def _load_model_setup(self:Self, caller_configs) -> Tuple[str, str]:  # noqa: ANN001
         """Load the effective model, optimizer, and criterion setup."""

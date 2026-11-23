@@ -238,8 +238,10 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
         pickle.dump(matching_metadata, file)
     with open(tmp_path / "metadata_1.pkl", "wb") as file:
         pickle.dump(stale_metadata, file)
+    for index in range(2):
+        (tmp_path / f"shadow_model_{index}.pkl").touch()
 
-    all_indices, filtered_indices = sm._filter(data_size=5)
+    all_indices, filtered_indices = sm._filter(data_size=5, shadow_population=np.arange(8))
 
     assert sorted(all_indices) == [0, 1]
     assert filtered_indices == [0]
@@ -322,8 +324,9 @@ def test_filter_rejects_shadow_models_from_different_population(image_handler: I
     stale_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
     with open(tmp_path / "metadata_0.pkl", "wb") as f:
         pickle.dump(stale_metadata, f)
+    (tmp_path / "shadow_model_0.pkl").touch()
 
-    all_indices, filtered_indices = sm._filter(data_size=5)
+    all_indices, filtered_indices = sm._filter(data_size=5, shadow_population=np.arange(8))
 
     assert all_indices == [0]
     assert filtered_indices == []

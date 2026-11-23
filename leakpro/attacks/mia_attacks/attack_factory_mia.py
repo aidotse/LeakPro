@@ -18,6 +18,7 @@ from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
 from leakpro.attacks.mia_attacks.oslo import AttackOSLO
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.ramia import AttackRaMIA
+from leakpro.attacks.mia_attacks.rapid import AttackRAPID
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.mia_attacks.seq_mia import AttackSeqMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
@@ -46,6 +47,7 @@ class AttackFactoryMIA:
         "oslo": AttackOSLO,
         "ez_mia": AttackEZMIA,
         "wbc": AttackWBC,
+        "rapid": AttackRAPID,
     }
 
     # Shared variables for all attacks
@@ -83,7 +85,9 @@ class AttackFactoryMIA:
                 logger.info("Creating shadow model handler singleton")
             else:
                 logger.info("Shadow model handler singleton already exists, updating state")
-            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
+            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(
+                handler, precompute_logits=getattr(attack_cls, "precompute_shadow_logits", True),
+            )
 
         if getattr(attack_cls, "requires_distillation_models", True):
             if AttackFactoryMIA.distillation_model_handler is None:

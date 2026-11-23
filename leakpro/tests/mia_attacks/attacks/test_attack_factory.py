@@ -65,13 +65,13 @@ def _reset_factory_singletons(image_handler: ImageInputHandler) -> None:  # noqa
     AttackFactoryMIA.shadow_model_handler, AttackFactoryMIA.distillation_model_handler = saved
 
 
-def test_all_registered_attacks_require_both_handlers() -> None:
-    """The gate must be a no-op for every attack that existed before it (LLM attacks opt out by design)."""
+def test_registered_classifier_attack_handler_requirements() -> None:
+    """RAPID requires shadow models and skips distillation setup."""
     for name, attack_cls in AttackFactoryMIA.attack_classes.items():
         if issubclass(attack_cls, (_NoAuxAttack, AbstractLLMMIA)):
             continue
         assert attack_cls.requires_shadow_models is True, name
-        assert attack_cls.requires_distillation_models is True, name
+        assert attack_cls.requires_distillation_models is (name != "rapid"), name
 
 
 @pytest.mark.usefixtures("_reset_factory_singletons")

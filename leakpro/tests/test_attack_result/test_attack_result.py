@@ -4,14 +4,51 @@
 #
 """Tests for the attack_result module."""
 
+from __future__ import annotations
+
+import json
 import os
 import tempfile
+from pathlib import Path
 from pytest_mock import MockerFixture
 
 import numpy as np
+import pytest
 
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
+
+
+@pytest.mark.parametrize("ids", [
+    [17.9, 4.2], [True, 4], [-1, 4], np.array([2**63, 4], dtype=np.uint64),
+    [np.timedelta64(17, "ns"), 4], np.array([17, 4], dtype="timedelta64[ns]"),
+])
+def test_full_scores_reject_invalid_audit_indices(ids: list | np.ndarray) -> None:
+    """Only nonnegative integers can identify population records."""
+    with pytest.raises(ValueError, match="nonnegative integer population indices"):
+        MIAResult.from_full_scores([1, 0], [0.7, 0.2], result_name="source", audit_indices=ids)
+
+
+def test_audit_indices_are_copied_from_the_caller() -> None:
+    """Caller mutations cannot change the record order stored in the result."""
+    indices = np.array([17, 4], dtype=np.intp)
+    result = MIAResult.from_full_scores([1, 0], [0.7, 0.2], result_name="source", audit_indices=indices)
+    indices[:] = [4, 17]
+    np.testing.assert_array_equal(result.audit_indices, [17, 4])
+    assert result.result.audit_indices == [17, 4]
+
+
+@pytest.mark.parametrize("ids", [[True, 4], [17.0, 4.0], ["17", "4"]])
+def test_loading_results_does_not_coerce_audit_indices(tmp_path, ids: list) -> None:
+    """Reject serialized IDs of the wrong type before restoring an index map."""
+    result = MIAResult.from_full_scores([1, 0], [0.7, 0.2], result_name="source")
+    payload = result.result.model_dump()
+    payload["audit_indices"] = ids
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(payload, default=lambda value: value.tolist()))
+    with pytest.raises(ValueError, match="audit_indices"):
+        MIAResult.load(str(path))
+
 
 class TestMIAResult:
     """Test class for MIAResult."""
@@ -118,6 +155,25 @@ class TestMIAResult:
         self.miaresult_new = MIAResult.load(data_path)
         assert np.allclose(self.miaresult_new.fpr, self.fpr_array)
         assert np.allclose(self.miaresult_new.tpr, self.tpr_array)
+
+    def test_interrupted_save_preserves_result(self:Self, mocker: MockerFixture) -> None:
+        """Keep the previous loadable result if writing its replacement fails."""
+        result = self.miaresult_full
+        attack = mocker.Mock(attack_id=result.id)
+        result.save(attack, self.temp_dir.name)
+        path = Path(self.temp_dir.name) / "data_objects" / f"{result.id}.json"
+        saved = path.read_bytes()
+
+        def interrupted_dump(_data, stream, **_kwargs):
+            stream.write('{"result_name":')
+            raise InterruptedError("result write interrupted")
+
+        mocker.patch("json.dump", side_effect=interrupted_dump)
+        with pytest.raises(InterruptedError, match="result write interrupted"):
+            result.save(attack, self.temp_dir.name)
+
+        assert path.read_bytes() == saved
+        np.testing.assert_array_equal(MIAResult.load(str(path)).signal_values, result.signal_values)
 
     def test_latex(self:Self, mocker: MockerFixture) -> None:
         """Test if the LaTeX content is generated correctly."""

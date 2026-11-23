@@ -6,7 +6,10 @@
 
 import hashlib
 import json
-from typing import Callable
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Callable, Iterator
 
 import numpy as np
 import torch
@@ -16,6 +19,15 @@ from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 # Prefixes that wrappers add to every state-dict key: Opacus's GradSampleModule
 # ("_module.") and DataParallel / DistributedDataParallel ("module.").
 WRAPPER_PREFIXES = ("_module.", "module.")
+
+
+@contextmanager
+def atomic_output_path(path: Path) -> Iterator[Path]:
+    """Replace a file only after its writer finishes successfully."""
+    with TemporaryDirectory(dir=path.parent, prefix=".write-") as directory:
+        pending = Path(directory) / path.name
+        yield pending
+        pending.replace(path)
 
 
 def hash_config(config: dict) -> str:

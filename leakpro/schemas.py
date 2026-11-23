@@ -8,7 +8,7 @@ from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Unio
 
 import numpy as np
 import optuna
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from torch.nn import Module
 
 from leakpro.risk.schemas import UseCaseProfile
@@ -331,6 +331,7 @@ class MIAResultSchema(BaseModel):
     accuracy: Union[List[float], float] = Field(..., description="Attack accuracy")
     fixed_fpr: Union[Dict[str, float], None] = Field(..., description="Fixed FPR values")
     signal_values: Union[List[float], None] = Field(..., description="Signal values")
+    audit_indices: Optional[List[StrictInt]] = Field(None, description="Population index for each reported score")
     true_labels: List[int] = Field(..., description="True labels")
     config: Dict[str, Any] = Field(..., description="Configuration of the attack")
     tp: Union[ArrayOrScalar, None] = Field(None, description="TP alues")
