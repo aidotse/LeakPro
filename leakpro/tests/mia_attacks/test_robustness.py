@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import torch
 import yaml
+from scipy.integrate import trapezoid
 from scipy.special import logsumexp
 from scipy.stats import norm
 from torch import nn
@@ -519,7 +520,9 @@ def test_rmia_regression_uses_reference_only_scale_without_changing_ordinary_sta
     handler.target_model = TinyModel()
     handler.train(handler.get_dataloader(handler.train_indices), handler.target_model, criterion,
                   handler.get_optimizer(handler.target_model), 1)
-    attack = AttackFactoryMIA.create_attack("rmia", {"num_shadow_models": 4, "online": True, "gamma": 1.0}, handler)
+    # Audit and auxiliary records can overlap, producing ratios near 1.
+    # Keep those comparisons away from the cutoff in this scale test.
+    attack = AttackFactoryMIA.create_attack("rmia", {"num_shadow_models": 4, "online": True, "gamma": 1.1}, handler)
     runs = attack.run_robustness(n_runs=3, seed=18)
     ordinary_scale = attack._scale
     ids = [-1, *map(int, attack.shadow_model_indices)]
@@ -975,4 +978,4 @@ def test_roc_does_not_move_vertical_jump_into_preceding_segment():
     assert roc["mean_tpr"][roc["fpr"].index(0.25)] == 0
     at_jump = np.asarray(roc["fpr"]) == 0.5
     np.testing.assert_allclose(np.asarray(roc["mean_tpr"])[at_jump], [0, 0.75])
-    assert np.trapz(roc["mean_tpr"], roc["fpr"]) == pytest.approx((first.roc_auc + second.roc_auc) / 2)
+    assert trapezoid(roc["mean_tpr"], roc["fpr"]) == pytest.approx((first.roc_auc + second.roc_auc) / 2)
