@@ -1,32 +1,45 @@
 # Gradient Inversion Attack (GIA) Examples
 
-Examples of gradient inversion attacks, which try to reconstruct a client's private training data from the gradient(s) it shares during federated learning.
+Examples of gradient inversion attacks, which reconstruct a client's private training data from the gradient it shares in federated learning. Start with [getting_started](./getting_started/README.md).
 
-**Start here:** the modular GIA framework, documented in [leakpro/attacks/gia_attacks/modular](../../leakpro/attacks/gia_attacks/modular/README.md), composes and runs gradient inversion attacks. The examples below predate it and each hard-code a single classic attack.
+Run every command from the repository root. `--quick` is an offline CPU smoke run on synthetic data (seconds each; it checks the pipeline, not the quality). Without it the example runs the full experiment, usually with a GPU and a one-off dataset download. Results are written to `examples/gia/outputs/<script>/`.
 
-## Images (CIFAR / CelebA)
+| Section | Example | Question | Attack | Quick | Full | Needs |
+|---|---|---|---|---|---|---|
+| [getting_started](./getting_started/README.md) | `quickstart` | How do I run an attack? | Inverting Gradients | `python -m examples.gia.getting_started.quickstart --quick` | `python -m examples.gia.getting_started.quickstart` | CIFAR-10 (full) |
+| [getting_started](./getting_started/README.md) | `compose_your_own_attack` | How do I build an attack from parts? | Cosine matching + TV + custom loss | `python -m examples.gia.getting_started.compose_your_own_attack --quick` | `python -m examples.gia.getting_started.compose_your_own_attack` | CIFAR-10 (full) |
+| [getting_started](./getting_started/README.md) | `hpo_and_split_runs` | How do I tune and run stages separately? | Inverting Gradients | `python -m examples.gia.getting_started.hpo_and_split_runs --quick` | `python -m examples.gia.getting_started.hpo_and_split_runs` | `optuna`, CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `compare_attacks` | Which classic attack is best? | DLG, iDLG, Geiping, Huang, Yin, GIA Running/Estimate | `python -m examples.gia.image_classification.compare_attacks --quick` | `python -m examples.gia.image_classification.compare_attacks` | CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `bn_statistics` | What do BN statistics buy? | Huang, GIA Running/Estimate | `python -m examples.gia.image_classification.bn_statistics --quick` | `python -m examples.gia.image_classification.bn_statistics` | CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `label_inference` | Which label inference works? | Oracle, iDLG, Dimitrov | `python -m examples.gia.image_classification.label_inference --quick` | `python -m examples.gia.image_classification.label_inference` | CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `multi_seed` | Does multi-seed help? | See-Through-Gradients | `python -m examples.gia.image_classification.multi_seed --quick` | `python -m examples.gia.image_classification.multi_seed` | CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `fedavg` | Effect of local epochs and batch size? | Dimitrov | `python -m examples.gia.image_classification.fedavg --quick` | `python -m examples.gia.image_classification.fedavg` | CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `scaling` | Quality versus batch size and epochs? | Inverting Gradients (batch), Dimitrov (epochs) | `python -m examples.gia.image_classification.scaling --quick` | `python -m examples.gia.image_classification.scaling` | CIFAR-10 (full) |
+| [image_classification](./image_classification/README.md) | `optimization_choices` | Which optimisation choices matter? | Inverting Gradients | `python -m examples.gia.image_classification.optimization_choices --quick` | `python -m examples.gia.image_classification.optimization_choices` | CIFAR-10 (full) |
 
-| Example | Attack | Notes |
-|---|---|---|
-| [inverting_cifar10_1_image](inverting_cifar10_1_image/README.md) | Inverting Gradients (Geiping et al.) | Baseline: single image |
-| [inverting_cifar100_16_images](inverting_cifar100_16_images/README.md) | Inverting Gradients (Geiping et al.) | Batch of 16, with pre-training |
-| [inverting_celebA_1_image](inverting_celebA_1_image/README.md) | Inverting Gradients (Geiping et al.) | Multi-label attribute classifier |
-| [huang_cifar10_16_images](huang_cifar10_16_images/README.md) | Huang et al. | BN-statistics attack, batch of 16 |
-| [huang_optuna](huang_optuna/README.md) | Huang et al. | Optuna hyperparameter tuning |
-| [GIA_base](GIA_base/README.md) | GIA Estimate (Huang variant) | BN stats estimated from proxy data |
-| [GIA_base_running](GIA_base_running/README.md) | GIA Running (Huang variant) | BN stats inferred from momentum updates |
-| [GIA_base_convnext_imagenet](GIA_base_convnext_imagenet/README.md) | GIA Estimate | ConvNeXt on ImageNet |
-| [coco_yolo_1_image](coco_yolo_1_image/README.md) | Inverting Gradients (Geiping et al.) | Modified YOLO on COCO |
+The other folders here (`inverting_cifar10_1_image`, `inverting_cifar100_16_images`, `inverting_celebA_1_image`, `huang_cifar10_16_images`, `huang_optuna`, `GIA_base`, `GIA_base_running`, `GIA_base_convnext_imagenet`, `coco_yolo_1_image`, `pii_inverting_masked_text`, `evaluating_gia_train` and `bn_research`) predate the modular framework: they use the legacy attack classes in `leakpro/attacks/gia_attacks/*.py`, and each has its own README.
 
-## Text
+The `common/` folder holds the shared command-line, data, model, runner and plotting helpers used by the examples.
 
-| Example | Attack | Notes |
-|---|---|---|
-| [pii_inverting_masked_text](pii_inverting_masked_text/README.md) | Inverting Gradients (Geiping et al.), text variant | PII leakage from a Longformer NER model |
+## Reproducing the results
 
-## Other
+Each section README has a results block per comparative script, generated from the saved `results.json` files. To rerun every example in the quick mode as the test suite does:
 
-| Example | Purpose |
-|---|---|
-| [evaluating_gia_train/AMM_kit](evaluating_gia_train/AMM_kit/README.md) | Validates LeakPro's differentiable training loop matches plain PyTorch |
-| [bn_research](bn_research/README.md) | Experimental, not maintained — slated for removal |
+```
+pytest leakpro/tests/gia/integration/test_examples_quick.py --run-slow
+```
+
+To rerun every example at full size, with the settings the READMEs report:
+
+```
+python -m examples.gia.common.run_all                 # everything not yet done
+python -m examples.gia.common.run_all --only fedavg   # selected examples
+python -m examples.gia.common.run_all --dry-run       # print the commands only
+```
+
+`run_all` writes one directory per example under `examples/gia/outputs/`, logs each run to its `run.log`, waits for a free GPU, continues after a failed example, and skips examples whose `results.json` was written at the current commit by a run that succeeded (`--any-commit` accepts results from any commit). Then render the result blocks into a README with `python -m examples.gia.common.report <README.md>`.
+
+Every example accepts two flags that matter for full runs:
+
+- `--iter-scale F` multiplies every optimisation budget by `F` (for example `0.25` for a shorter run on a slow GPU). `--quick` ignores it.
+- `--deterministic` makes the run bit-reproducible on one machine: deterministic CUDA kernels and cuDNN without autotuning. It is slower, and `run_all` always sets it. Without it, GPU runs of the same command differ by up to a couple of dB in PSNR.
