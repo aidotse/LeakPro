@@ -30,7 +30,8 @@ dependencies = [
 [project.optional-dependencies]
 mia = ["torch", "torchvision", "optuna", "opacus", "mne", "pytorch-tcn"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
-federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
+federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations",
+             "lpips"]
 minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
 # LLM membership-inference attacks (leakpro/attacks/mia_attacks/llm). The attacks themselves
 # only need torch; the extras are for the example that fine-tunes and loads HuggingFace models.

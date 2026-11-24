@@ -122,27 +122,36 @@ class InferredLNFeatureHook:
         self.hook.remove()
 
 class InferredBNFeatureHook:
-    """Implementation of the forward hook to track feature statistics and compute a loss on them.
+    """Forward hook on a BatchNorm layer that measures its input statistics against target statistics.
 
-    Will compute mean and variance, and will use l2 as a loss.
+    On each forward it computes the per-channel mean and biased variance of the layer input over every
+    dimension except the channel dimension (``[N, C]``, ``[N, C, L]`` and ``[N, C, H, W]`` inputs), and
+    stores ``r_feature = ||target_var - var||_2 + ||target_mean - mean||_2``.
+
+    ``unbiased_target_var=True`` declares ``target_batch_var`` an unbiased estimate, as stored in a BatchNorm
+    layer's ``running_var`` update: on every forward the hook rescales it to the biased variance with the
+    per-channel element count ``n`` of that input (``N``, ``N*L`` or ``N*H*W``), ``var * (n - 1) / n``, which is
+    the count PyTorch uses for the running-variance update.
     """
 
-    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d, target_batch_mean: torch.tensor, target_batch_var: torch.tensor
-                 ) -> None:
+    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d, target_batch_mean: torch.tensor,
+                 target_batch_var: torch.tensor, *, unbiased_target_var: bool = False) -> None:
         self.hook = module.register_forward_hook(self.hook_fn)
         self.target_batch_mean = target_batch_mean
         self.target_batch_var = target_batch_var
+        self._unbiased_target_var = target_batch_var if unbiased_target_var else None
+        self.r_feature = None
 
     def hook_fn(self: Self, _module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, _: torch.Tensor) -> None: # noqa: ARG002
         """Hook to compute feature distribution regularization toward client statistics."""
-        nch = input[0].shape[1]
-        # Compute the mean of the feature maps across batch, height, and width dimensions
-        mean = input[0].mean([0, 2, 3])
-        # Compute the variance for each channel
-        var = (input[0].permute(1, 0, 2,
-                                3).contiguous().view([nch,
-                                                      -1]).var(1,
-                                                               unbiased=False))
+        x = input[0]
+        nch = x.shape[1]
+        per_channel = x.transpose(0, 1).reshape(nch, -1)
+        mean = per_channel.mean(1)
+        var = per_channel.var(1, unbiased=False)
+        if self._unbiased_target_var is not None:
+            n = per_channel.shape[1]
+            self.target_batch_var = self._unbiased_target_var * ((n - 1.0) / n) if n > 1 else self._unbiased_target_var
 
         r_feature = torch.norm(self.target_batch_var.data - var, 2) + torch.norm(
             self.target_batch_mean.data - mean, 2)

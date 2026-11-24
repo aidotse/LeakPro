@@ -4,7 +4,7 @@ This example demonstrates **GIABaseRunning**, a variant of the **Huang et al., 2
 
 ## Goal
 
-Show a middle-ground threat model between "attacker reads BN stats directly" (original Huang attack) and "attacker only has proxy data" (GIA Estimate): here the attacker knows the client's local training hyperparameters (e.g. BN momentum) and uses that to infer the BN statistics used during the client's training step. This corresponds to Model E (statistical-informed attacker, in the modular framework's terminology, see [gia_modular_basic](../gia_modular_basic/README.md)).
+Show a middle-ground threat model between "attacker reads BN stats directly" (original Huang attack) and "attacker only has proxy data" (GIA Estimate): here the attacker knows the client's local training hyperparameters (e.g. BN momentum) and uses that to infer the BN statistics used during the client's training step. In the modular framework this is the `gia_running` preset, i.e. `ThreatModel(has_bn_statistics=True, has_local_hyperparameters=True)` (see the [modular README](../../../leakpro/attacks/gia_attacks/modular/README.md)).
 
 ## Setup
 

@@ -4,336 +4,66 @@
 #
 """Threat model system for gradient inversion attacks.
 
-This module defines attacker capabilities using boolean flags.
-Components declare which capabilities they require, and the threat model
-validates if it satisfies those requirements.
+The ThreatModel is a data firewall: its ``sanitize()`` method strips fields
+from a ``ClientObservation`` that the attacker is not allowed to see before
+the observation reaches any LossTerm. Components declare the fields they read
+(``requirements()``), and ``run_attack`` checks them against the sanitized copy
+before the first stage runs.
 
-Maps to literature threat models (A-H) from FL GIA taxonomy papers.
+Usage::
+
+    attack.threat_model = ThreatModel(has_bn_statistics=True, has_local_hyperparameters=True)
+    state, ctx = run_attack(attack, model, observation, ...)  # sanitizes a copy of observation
 """
-
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, fields, replace
 
-from leakpro.attacks.gia_attacks.modular.core.component_base import Component
+from leakpro.attacks.gia_attacks.modular.core.state import ClientObservation
 
 
 @dataclass
-class AttackerCapabilities:
-    """Attacker capabilities for gradient inversion attacks.
+class ThreatModel:
+    """Explicit capability flags that define what the attacker can observe.
 
-    Each capability is a boolean: attacker either has it or doesn't.
-    Components declare which capabilities they require.
+    Set a flag to ``True`` to grant access; ``False`` (the default) causes
+    ``sanitize()`` to strip the corresponding ``ClientObservation`` field.
+
+    Attributes:
+        has_bn_statistics:          BN running statistics (mean/var per layer), before and after
+            local training.
+        has_local_hyperparameters:  Local training config (batch size, loss value).
+
     """
-
-    # =========================================================================
-    # Information Access
-    # =========================================================================
-
-    has_gradients: bool = True
-    """Has access to model gradients (always True in FL)"""
 
     has_bn_statistics: bool = False
-    """Has access to batch normalization running statistics"""
-
     has_local_hyperparameters: bool = False
-    """Knows local training hyperparameters (lr, batch size, epochs, optimizer)"""
 
-    has_surrogate_data: bool = False
-    """Has access to public dataset from same/similar domain"""
+    def sanitize(self, obs: ClientObservation) -> ClientObservation:
+        """A copy of ``obs`` without the fields the attacker is not allowed to see; ``obs`` is unchanged.
 
-    has_auxiliary_knowledge: bool = False
-    """
-    Has easily accessible auxiliary knowledge (e.g., natural images are smooth,
-    enabling TV regularization; images are bounded [0,1]; etc.)
-
-    Note: This is NOT data from the actual distribution, just general assumptions
-    about the data domain that anyone could reasonably make.
-    """
-
-    # =========================================================================
-    # Active Capabilities
-    # =========================================================================
-
-    can_modify_architecture: bool = False
-    """Can manipulate the global model architecture"""
-
-    can_inject_sybils: bool = False
-    """Can inject fake clients into the federation"""
-
-    # =========================================================================
-    # Metadata
-    # =========================================================================
-
-    name: str = "custom"
-    description: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "name": self.name,
-            "has_gradients": self.has_gradients,
-            "has_bn_statistics": self.has_bn_statistics,
-            "has_local_hyperparameters": self.has_local_hyperparameters,
-            "has_surrogate_data": self.has_surrogate_data,
-            "has_auxiliary_knowledge": self.has_auxiliary_knowledge,
-            "can_modify_architecture": self.can_modify_architecture,
-            "can_inject_sybils": self.can_inject_sybils,
-            "description": self.description,
-        }
-
-
-class ThreatModel:
-    """Threat model defined by attacker capabilities.
-
-    Used to:
-    1. Declare what information/access an attacker has
-    2. Validate if components can run under this threat model
-    """
-
-    def __init__(self, capabilities: AttackerCapabilities) -> None:
-        self.capabilities = capabilities
-
-    @property
-    def name(self) -> str:
-        """Name of the threat model (derived from capabilities)."""
-        return self.capabilities.name
-
-    def allows_component(self, required_capabilities: dict[str, bool]) -> tuple[bool, list[str]]:
-        """Check if this threat model satisfies component requirements.
-
-        Args:
-            required_capabilities: Dict mapping capability_name -> required (True/False)
-
-        Returns:
-            (is_satisfied, list_of_missing_capabilities)
-
+        Typed fields are set to None; ``extra`` keys mapped to a withheld flag are deleted, so a component
+        that reads one fails with a KeyError rather than computing on a None. Tensors are shared with
+        ``obs``, not copied.
         """
-        missing = []
+        stripped: dict = {}
+        if not self.has_bn_statistics:
+            stripped.update(bn_stats=None, pre_bn_stats=None)
+        if not self.has_local_hyperparameters:
+            stripped.update(batch_size=None, loss_value=None)
+        extra = dict(obs.extra)
+        for flag, keys in _EXTRA_KEYS_BY_FLAG.items():
+            if not getattr(self, flag):
+                for key in keys:
+                    extra.pop(key, None)
+        return replace(obs, extra=extra, **stripped)
 
-        for cap_name, is_required in required_capabilities.items():
-            if not is_required:
-                continue  # Component doesn't need this capability
-
-            actual = getattr(self.capabilities, cap_name, None)
-
-            if actual is None:
-                missing.append(f"Unknown capability: {cap_name}")
-            elif not actual:
-                # Component requires this but threat model doesn't have it
-                missing.append(f"Missing: {cap_name}")
-
-        return len(missing) == 0, missing
-
-    def __repr__(self) -> str:
-        """String representation of the threat model."""
-        return f"ThreatModel(name='{self.name}', capabilities={self.capabilities})"
+    def granted(self) -> list[str]:
+        """Names of the capabilities this threat model grants — for logging/reporting."""
+        return [f.name for f in fields(self) if getattr(self, f.name)]
 
 
-
-# =============================================================================
-# Component Requirements
-# =============================================================================
-
-def compute_requirements(*components: Component) -> dict[str, bool]:
-    """Compute capability requirements from components.
-
-    Takes the union: if any component requires a capability, it's required.
-    This is used when a component (like an optimizer) is composed of
-    sub-components (like loss functions).
-
-    Args:
-        *components: Variable number of component instances or requirement dicts
-
-    Returns:
-        Dict of capability_name -> True (only includes required capabilities)
-
-    Example:
-        >>> gradient_loss_reqs = {"has_gradients": True}
-        >>> tv_loss_reqs = {"has_gradients": True, "has_auxiliary_knowledge": True}
-        >>> optimizer_reqs = compute_requirements(gradient_loss_reqs, tv_loss_reqs)
-        >>> # Result: {"has_gradients": True, "has_auxiliary_knowledge": True}
-
-    """
-    aggregated = {}
-
-    for item in components:
-        # Handle different input types
-        if isinstance(item, dict):
-            reqs = item
-        elif hasattr(item, "get_metadata"):
-            metadata = item.get_metadata()
-            reqs = getattr(metadata, "required_capabilities", {})
-        elif hasattr(item, "required_capabilities"):
-            reqs = item.required_capabilities
-        else:
-            continue
-
-        # Merge requirements
-        for cap_name, is_required in reqs.items():
-            if is_required:
-                aggregated[cap_name] = True
-
-    return aggregated
-
-
-# =============================================================================
-# Literature Threat Models (A-H)
-# Paper Title: "SoK: Gradient Inversion Attacks in Federated Learning"
-# Authors: Carletti et al.
-# =============================================================================
-
-def model_a_eavesdropper() -> ThreatModel:
-    """Model A: Eavesdropper.
-
-    Only standard FL information:
-    - Model architecture (known)
-    - Gradients (shared)
-    - Number of samples per client
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_a",
-        description="Eavesdropper: only standard FL information",
-        has_gradients=True,
-        # All others False
-    ))
-
-
-def model_b_informed() -> ThreatModel:
-    """Model B: Informed Eavesdropper.
-
-    Model A + basic auxiliary knowledge (e.g., TV regularization, data ranges).
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_b",
-        description="Informed Eavesdropper: + auxiliary knowledge (TV reg, etc.)",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-    ))
-
-
-def model_c_parameter_aware() -> ThreatModel:
-    """Model C: Parameter-Aware Eavesdropper.
-
-    Model B + knowledge of local training hyperparameters.
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_c",
-        description="Parameter-Aware Eavesdropper: + training hyperparameters",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-        has_local_hyperparameters=True,
-    ))
-
-
-def model_d_data_enhanced() -> ThreatModel:
-    """Model D: Data-Enhanced Eavesdropper.
-
-    Model C + surrogate public dataset.
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_d",
-        description="Data-Enhanced Eavesdropper: + surrogate dataset",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-        has_local_hyperparameters=True,
-        has_surrogate_data=True,
-    ))
-
-
-def model_e_statistical() -> ThreatModel:
-    """Model E: Statistical-Informed Eavesdropper.
-
-    Model D + batch normalization statistics.
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_e",
-        description="Statistical-Informed Eavesdropper: + BN statistics",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-        has_local_hyperparameters=True,
-        has_surrogate_data=True,
-        has_bn_statistics=True,
-    ))
-
-
-def model_f_active() -> ThreatModel:
-    """Model F: Active Manipulator.
-
-    Can modify model architecture for targeted extraction.
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_f",
-        description="Active Manipulator: can modify architecture",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-        has_local_hyperparameters=True,
-        can_modify_architecture=True,
-    ))
-
-
-def model_g_data_enhanced_active() -> ThreatModel:
-    """Model G: Data-Enhanced Manipulator.
-
-    Model F + surrogate dataset.
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_g",
-        description="Data-Enhanced Manipulator: architecture + surrogate data",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-        has_local_hyperparameters=True,
-        has_surrogate_data=True,
-        can_modify_architecture=True,
-    ))
-
-
-def model_h_sybil() -> ThreatModel:
-    """Model H: Active Client Manipulator.
-
-    Model G + ability to inject Sybil clients.
-    """
-    return ThreatModel(AttackerCapabilities(
-        name="model_h",
-        description="Active Client Manipulator: can inject Sybil clients",
-        has_gradients=True,
-        has_auxiliary_knowledge=True,
-        has_local_hyperparameters=True,
-        has_surrogate_data=True,
-        can_modify_architecture=True,
-        can_inject_sybils=True,
-    ))
-
-
-# Registry
-THREAT_MODELS = {
-    "model_a": model_a_eavesdropper,
-    "model_b": model_b_informed,
-    "model_c": model_c_parameter_aware,
-    "model_d": model_d_data_enhanced,
-    "model_e": model_e_statistical,
-    "model_f": model_f_active,
-    "model_g": model_g_data_enhanced_active,
-    "model_h": model_h_sybil,
-}
-
-
-def get_threat_model(name: str) -> ThreatModel:
-    """Get threat model by name.
-
-    Args:
-        name: One of the registered threat model names
-
-    Returns:
-        ThreatModel instance
-
-    Raises:
-        ValueError: If name not found
-
-    """
-    if name not in THREAT_MODELS:
-        available = ", ".join(THREAT_MODELS.keys())
-        raise ValueError(f"Unknown threat model '{name}'. Available: {available}")
-
-    return THREAT_MODELS[name]()
+# Flag -> keys stripped from ClientObservation.extra when the flag is False.
+# Declared as data so adding a capability is a one-line change, and kept
+# module-level so it stays out of the dataclass field list and __eq__/__repr__.
+_EXTRA_KEYS_BY_FLAG: dict[str, tuple[str, ...]] = {}

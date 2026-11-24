@@ -102,3 +102,9 @@ def tabular_handler(manage_storage_directory) -> TabularInputHandler:
 
     # Yield control back to the test session
     return handler
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Opt-in switch for the slow GIA tests (see leakpro/tests/gia/conftest.py)."""
+    group = parser.getgroup("gia")
+    group.addoption("--run-slow", action="store_true", default=False, help="run tests marked gia_slow")
