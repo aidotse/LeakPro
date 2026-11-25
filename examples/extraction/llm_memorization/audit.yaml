@@ -23,7 +23,6 @@ audit:
       # Optional Phases 3-4, the extensive attack (needs the weights): LoRA r=16, 5 epochs, then Phase 1
       # again on the tuned model. Uncomment to include them (or pass --finetune to run_extraction.py).
       # finetune: {}
-      store_text: full
 
 target:
   module_path: ./target_model.py

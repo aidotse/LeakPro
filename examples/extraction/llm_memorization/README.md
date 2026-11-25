@@ -13,7 +13,7 @@ lowercasing and collapsing whitespace) in a reference corpus, as a substring of 
 | Phase | Access | What it does | Config key |
 |---|---|---|---|
 | 1. Initial extraction | black box | BOS-only sampling, temperature-decay sampling and greedy continuation of corpus prefixes; rank by zlib and lowercase membership scores; verify the top 5% per strategy → **S0** | `initial` |
-| 2. Expansion | black box | re-prompt with 30-50 token anchors cut from S0, 150 samples per anchor; verify; keep sequences that cover text S0 did not → **S1-novel** | `expansion` |
+| 2. Expansion | black box | re-prompt with 30-50 token anchors cut from S0, 150 samples per anchor; verify; keep sequences with windows S0 did not have → **S1-novel** | `expansion` |
 | 3. Fine-tuning *(optional)* | weights | LoRA continual pre-training on S0 ∪ S1-novel | `finetune` |
 | 4. Re-extraction *(optional)* | weights | Phase 1 again on the tuned model; drop generations whose generated text shares a 30-token window with the fine-tuning data, before filtering → **S_new** | `finetune` |
 
@@ -31,20 +31,25 @@ Phase 1's scoring, prefix strategy and temperature decay follow Carlini et al.,
 [*Extracting Training Data from Large Language Models*](https://www.usenix.org/conference/usenixsecurity21/presentation/carlini-extracting)
 (USENIX Security 2021), and the fine-tuning phase is influenced by Nasr et al.,
 *Scalable Extraction of Training Data from Aligned, Production Language Models* (2025).
-This implementation differs from those works in these ways:
+With the defaults, every phase follows the thesis pipeline step by step. The differences:
 
-| | Here | Thesis | Carlini et al. |
-|---|---|---|---|
-| Sampling (`baseline`, `temp_decay`) | `top_k=50`, `top_p=0.95` | `top_p=0.95` | top-n 40, no nucleus filter |
-| Prefixes (`conditional`) | greedy | greedy | sampled (top-n) |
-| Fine-tuning | LoRA, unquantized model, 10-step warm-up | QLoRA (4-bit base model) | n/a |
-| Phase 2 novelty | covered text and corpus words | window strings vs. Phase 1's window set | n/a |
-| Counts | sequences and unique passages | sequences | unique examples |
-| Phase 4 overlap check | generated text only | whole sequence | n/a |
+| | Here | Thesis |
+|---|---|---|
+| Fine-tuning | LoRA on the unquantized model (dtype from the hardware), AdamW in a PyTorch loop | QLoRA (4-bit base model), 8-bit paged AdamW, fp16 |
+| Adapter used in Phase 4 | the one at the end of training | a chosen training checkpoint |
+| Seeds | one per generation batch (resumable); same procedure, different samples | one per script |
+| Counts | sequences, plus unique passages | sequences |
+| Phase 2 prompt join (`expansion.prompt_join`) | `space` (default, as the thesis) or `tokens` | space |
+| Phase 2 novelty (`expansion.novelty`) | `window` (default, as the thesis) or `coverage` | window strings |
+
+`prompt_join: tokens` decodes prompt and continuation together, so a prefix cut inside a word is not
+split in two. `novelty: coverage` counts a sequence as novel only if it covers text or corpus words S0
+does not; window strings depend on where the window grid falls, so `window` also counts S0 text
+shifted by a word. Compared with Carlini et al., sampling uses `top_k=50` and `top_p=0.95` (they use
+top-n 40 without a nucleus filter) and prefixes are continued greedily (they sample).
 
 The **attacker verifier** (`attacker_verifier`) is a public corpus the attacker believes resembles the
-training data; its results drive the attack. If you, as the auditor, have the real training data, add
-it as `audit_oracle`: it is checked for every phase and reported, but never used by the attack.
+training data; its results drive the attack.
 
 ## Install
 
@@ -193,10 +198,9 @@ The counts per phase are also printed at the end of every step (and kept in `run
 
 Results go to `<output_dir>/results/<attack id>/`:
 
-- `result.json`: counts per phase and strategy (generated, kept, selected, verified, rate, and per
-  phase `anchors`, `novel`, `overlap_removed` or `finetune_corpus`);
-- `extracted.jsonl`: one record per extracted sequence with its matched windows. Set
-  `store_text: hash` or `none` if the report must not contain the extracted text.
+- `result.json`: counts per phase and strategy (generated, kept, selected, verified, unique, rate,
+  and per phase `anchors`, `novel`, `novel_unique`, `overlap_removed` or `finetune_corpus`);
+- `extracted.jsonl`: one record per extracted sequence with its text and matched windows.
 
 Intermediate stages are cached in `<output_dir>/artifacts`. Running the same command again resumes an
 interrupted run; changing a setting recomputes only the stages after it.

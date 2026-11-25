@@ -9,9 +9,9 @@
 2. :class:`AnchorGenerator` prompts with a random-length prefix of each anchor (one length per batch,
    from ``prefix_lengths``) and samples ``gens_per_anchor`` continuations with a temperature that
    decays from ``t_start``. Every generation is ``max_tokens`` long in total (prefix included).
-3. After filtering and verification (on prefix + continuation, decoded together so a prefix cut inside
-   a word does not split it), :func:`~leakpro.attacks.utils.extraction.coverage.novel_candidates` keeps
-   the sequences with a verified window that S0 does not already cover (see ``coverage``).
+3. After filtering and verification (on prefix + continuation, see :func:`join_prompt`),
+   :func:`~leakpro.attacks.utils.extraction.coverage.novel_candidates` keeps the sequences with a
+   verified window that S0 does not already have (``novelty``: window strings or covered content).
 """
 
 import math
@@ -118,7 +118,7 @@ class AnchorGenerator:
                               backend)
         out = []
         for row, ids in enumerate(new):
-            out.append(Candidate(
+            cand = Candidate(
                 id=f"{self.phase}-{anchor_index:05d}-{rep * cfg.batch_size + row:04d}",
                 phase=self.phase,
                 strategy=self.name,
@@ -126,17 +126,22 @@ class AnchorGenerator:
                 gen_ids=list(ids),
                 prompt_text=prefix_text,
                 continuation=tok.decode(ids, skip_special_tokens=True).strip(),
-                full_text=joint_text(tok, prompt, ids),
+                full_text="",
                 meta={"batch": batch_index, "anchor": anchor_index, "prefix_len_tokens": length,
                       "parent_id": anchor["parent_id"], "parent_strategy": anchor["parent_strategy"]},
-            ))
+            )
+            cand.full_text = join_prompt(tok, cand, cfg.prompt_join)
+            out.append(cand)
         return out
 
 
-def joint_text(tok: TokenizerLike, prompt_ids: Sequence[int], gen_ids: Sequence[int]) -> str:
-    """Prompt and generation decoded as one sequence.
+def join_prompt(tok: TokenizerLike, cand: Candidate, how: Literal["space", "tokens"] = "space") -> str:
+    """Prompt and continuation as one text.
 
-    Decoding them separately and joining with a space splits a word in two whenever the prompt was cut
-    inside it, which shifts every later word index (and with it the verification windows).
+    ``space`` joins the decoded prefix and the decoded continuation with a space (the thesis pipeline).
+    When the prefix was cut inside a word, that splits the word in two and shifts every later word
+    index. ``tokens`` decodes the prompt and generated token ids together, which keeps the word whole.
     """
-    return tok.decode([*prompt_ids, *gen_ids], skip_special_tokens=True).strip()
+    if how == "tokens":
+        return tok.decode([*cand.prompt_ids, *cand.gen_ids], skip_special_tokens=True).strip()
+    return f"{cand.prompt_text} {cand.continuation}".strip()

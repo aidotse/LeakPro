@@ -17,8 +17,7 @@ from leakpro.reporting.report_handler import ReportHandler
 from leakpro.tests.extraction_attacks import fixtures
 from leakpro.tests.extraction_attacks.fixtures import SECRET, ExtractionInputHandler
 
-ROW = {"generated": 10, "kept": 9, "selected": 2, "verified": 1, "extraction_rate": 0.1,
-       "oracle_verified": None, "oracle_rate": None}
+ROW = {"generated": 10, "kept": 9, "selected": 2, "verified": 1, "unique": None, "extraction_rate": 0.1}
 
 
 def _result(rid: str = "abc_123") -> ExtractionResult:
@@ -26,7 +25,7 @@ def _result(rid: str = "abc_123") -> ExtractionResult:
         "initial": {"baseline": dict(ROW), "total": dict(ROW)},
         "expansion": {"expansion": {**ROW, "anchors": 3, "novel": 1}, "total": {**ROW, "anchors": 3, "novel": 1}},
     }
-    return ExtractionResult("memorization_extraction", rid, {}, metrics, [{"id": "x"}], store_text="hash")
+    return ExtractionResult("memorization_extraction", rid, {}, metrics, [{"id": "x"}])
 
 
 def test_latex_escape() -> None:
@@ -38,8 +37,8 @@ def test_extraction_section_lists_every_phase_without_text() -> None:
     latex = ExtractionResult.create_results([_result(), _result()])  # duplicate ids render once
     assert latex.count("\\subsection{") == 1
     assert "Phase 1: initial extraction" in latex and "Phase 2: expansion" in latex
-    assert "Anchors" in latex and "Novel" in latex and "& Oracle verified" not in latex  # empty columns dropped
-    assert "10.00\\%" in latex and "abc\\_123" in latex and "text stored: hash" in latex
+    assert "Anchors" in latex and "Novel" in latex and "& Unique" not in latex  # empty columns dropped
+    assert "10.00\\%" in latex and "abc\\_123" in latex
 
 
 def test_report_handler_renders_extraction_next_to_mia(tmp_path: Path) -> None:

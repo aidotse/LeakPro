@@ -6,7 +6,6 @@ generates the same text and the expected counts are known exactly.
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import pytest
 import yaml
@@ -47,7 +46,7 @@ def _audit(tmp_path: Path, attack: dict, name: str = "audit.yaml") -> str:
     return str(path)
 
 
-def _attack(tmp_path: Path, oracle_text: Optional[str] = None, with_attacker: bool = True) -> dict:
+def _attack(tmp_path: Path, with_attacker: bool = True) -> dict:
     corpus = _write_jsonl(tmp_path / "aux.jsonl", [{"doc_id": "noise", "text": "unrelated words"},
                                                    {"doc_id": "aux-1", "text": f"Header. {SECRET} Footer."}])
     attack = {
@@ -61,8 +60,6 @@ def _attack(tmp_path: Path, oracle_text: Optional[str] = None, with_attacker: bo
     }
     if with_attacker:
         attack["attacker_verifier"] = {"path": corpus}
-    if oracle_text is not None:
-        attack["audit_oracle"] = {"path": _write_jsonl(tmp_path / "train.jsonl", [{"doc_id": "train-1", "text": oracle_text}])}
     return attack
 
 
@@ -73,12 +70,12 @@ def _run(config_path: str) -> ExtractionResult:
 
 
 def test_extraction_audit_end_to_end(tmp_path: Path) -> None:
-    result = _run(_audit(tmp_path, _attack(tmp_path, oracle_text="nothing from the secret")))
+    result = _run(_audit(tmp_path, _attack(tmp_path)))
     m = result.metrics["initial"]
     for strategy in ("baseline", "temp_decay"):
         # all N generations are SECRET: one survives dedupe, it is selected and verified
         assert m[strategy] == {"generated": N, "kept": 1, "selected": 1, "verified": 1, "unique": 1,
-                               "extraction_rate": 1 / N, "oracle_verified": 0, "oracle_unique": 0, "oracle_rate": 0.0}
+                               "extraction_rate": 1 / N}
     # conditional continuations differ per prefix (each starts where its prefix ends); top 1 by zlib and
     # top 1 by lowercase may be different candidates, and every continuation is part of SECRET
     cond = m["conditional"]
@@ -92,25 +89,12 @@ def test_extraction_audit_end_to_end(tmp_path: Path) -> None:
     record = next(r for r in result.extracted if r["strategy"] == "baseline")
     assert record["continuation"] == SECRET
     assert record["attacker_matches"][0]["doc_id"] == "aux-1" and record["attacker_matches"][0]["cand_start"] == 0
-    assert record["oracle_matches"] == []
 
     out = tmp_path / "out"
     assert (out / "data_objects" / f"{result.id}.json").exists()
     loaded = ExtractionResult.load(str(out / "results" / result.id))
     assert loaded.metrics == json.loads(json.dumps(result.metrics))
     assert len(loaded.extracted) == len(result.extracted)
-
-
-def test_oracle_is_reported_but_does_not_change_the_attack(tmp_path: Path) -> None:
-    without = _run(_audit(tmp_path, _attack(tmp_path)))
-    with_oracle = _run(_audit(tmp_path, _attack(tmp_path, oracle_text=SECRET), name="audit2.yaml"))
-    for strategy in ("baseline", "temp_decay", "conditional", "total"):
-        a, b = without.metrics["initial"][strategy], with_oracle.metrics["initial"][strategy]
-        assert {k: a[k] for k in ("generated", "kept", "selected", "verified")} == \
-               {k: b[k] for k in ("generated", "kept", "selected", "verified")}
-        assert a["oracle_verified"] is None
-    total = with_oracle.metrics["initial"]["total"]
-    assert total["oracle_verified"] == total["verified"] == total["selected"]
 
 
 def test_without_attacker_verifier_nothing_is_verified(tmp_path: Path) -> None:
@@ -169,15 +153,6 @@ def test_changing_a_setting_recomputes_only_downstream(tmp_path: Path, monkeypat
     monkeypatch.setattr(generation.StrategyGenerator, "generate_batch", _fail)
     result = _run(_audit(tmp_path, attack, name="audit2.yaml"))
     assert 3 <= result.metrics["initial"]["conditional"]["selected"] <= 6  # int(6 * 0.5) = 3 per metric, union
-
-
-@pytest.mark.parametrize("store_text", ["hash", "none"])
-def test_store_text_redacts_saved_records(tmp_path: Path, store_text: str) -> None:
-    attack = {**_attack(tmp_path), "store_text": store_text}
-    result = _run(_audit(tmp_path, attack))
-    lines = (tmp_path / "out" / "results" / result.id / "extracted.jsonl").read_text(encoding="utf-8")
-    assert SECRET not in lines and "w10x" not in lines
-    assert result.extracted[0]["continuation"]  # the in-memory result keeps the text
 
 
 def test_editing_the_prefix_pool_regenerates_conditional(tmp_path: Path) -> None:

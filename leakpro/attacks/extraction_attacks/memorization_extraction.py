@@ -22,11 +22,14 @@ Phases 3 and 4 are an optional, stronger attack that needs the weights.
 1. Cut anchors of up to 50 tokens from S0, starting at each sequence's first verified window.
 2. Prompt with a random 30-50 token prefix of each anchor and sample 150 continuations per anchor
    (temperature decaying from 3 to 1).
-3. Filter and verify prefix + continuation, decoded together (all windows) -> **S1**.
-4. Keep the S1 sequences with at least one verified window that S0 does not cover -> **S1-novel**. A
-   window is covered when its text lies inside S0's verified text (at any word shift) or its corpus
-   words all lie inside S0's matches; S0 is verified on every window for this. Window strings alone
-   would not do: the same text shifted by a word gives different windows.
+3. Filter and verify prefix + continuation (all windows) -> **S1**. ``prompt_join: space`` (default)
+   joins the decoded prefix and continuation with a space; ``tokens`` decodes them together, so a
+   prefix cut inside a word does not split it.
+4. Keep the S1 sequences with a verified window S0 does not have -> **S1-novel**; S0 is verified on
+   every window for this. ``novelty: window`` (default) compares window strings; ``coverage`` asks
+   whether the window's text lies inside S0's verified text (at any word shift) or its corpus words
+   inside S0's matches. Window strings depend on where the window grid falls: the same text shifted
+   by a word gives different windows and counts as novel.
 
 **Phase 3, fine-tuning** (``finetune`` set): LoRA continual pre-training on S0 ∪ S1-novel (texts of at
 least 20 words, normalized-deduplicated, shuffled).
@@ -36,11 +39,9 @@ generation whose generated text (without the prompt) shares any 30-token window 
 corpus is dropped *before* filtering (both sides lowercased and whitespace-collapsed);
 filtering scores with the base model; verification as in Phase 1 -> **S_new**.
 
-**Counts.** Every phase reports sequences (``verified``) and distinct passages (``unique``): verified
-sequences whose matches share corpus words or a ``windowing.size``-word text belong to one passage.
-
-**Evaluation** (auditor only): an optional audit oracle checks the selected candidates of every phase
-against the real training data. Its verdicts are reported and never fed back into the attack.
+**Counts.** Every phase reports sequences (``verified``) and, as an addition, distinct passages
+(``unique``): verified sequences whose matches share corpus words or a ``windowing.size``-word text
+belong to one passage.
 
 **References.** The four-phase pipeline (initial extraction, expansion, fine-tuning, re-extraction) and
 its defaults are those of Matacuta, *Anything You Say Can and Will Be Used Against You: Iterative
@@ -52,19 +53,18 @@ and temperature decay follow Carlini et al., *Extracting Training Data from Larg
 (USENIX Security 2021); the fine-tuning phase is influenced by Nasr et al., *Scalable Extraction of
 Training Data from Aligned, Production Language Models* (2025).
 
-Where this implementation differs, so the numbers are not read as a reproduction of either work:
+With the defaults, every phase follows the thesis pipeline step by step. The differences:
 
-- *Sampling* (``baseline``, ``temp_decay``): ``top_k=50`` and ``top_p=0.95``, as in the thesis.
-  Carlini et al. sample with top-n 40 and no nucleus filter.
-- *Prefixes* (``conditional``): continued greedily, as in the thesis. Carlini et al. sample
-  (top-n) from the prefixes.
-- *Fine-tuning*: plain LoRA on the unquantized model with a 10-step warm-up. The thesis used QLoRA
-  (4-bit base model).
-- *Phase 2 novelty*: decided on covered text and corpus words. The thesis compared window strings
-  with Phase 1's exhaustive window set, which depends on where the window grid falls.
-- *Unique counts*: reported next to the sequence counts; the thesis reports sequences.
-- *Phase 4 overlap*: only the generated text is compared with the fine-tuning corpus, so a prefix that
-  happens to be fine-tuning text does not drop the generation. The thesis compared the whole sequence.
+- *Fine-tuning*: plain LoRA on the unquantized model (dtype from the hardware), trained with AdamW in
+  a PyTorch loop; Phase 4 uses the adapter at the end of training. The thesis used QLoRA (4-bit base
+  model, 8-bit paged AdamW, fp16) and a chosen training checkpoint.
+- *Seeds*: every generation batch has its own seed, so runs resume with the same samples; the thesis
+  seeded each script once. The samples therefore differ, not the procedure.
+- *Additions*: unique-passage counts next to the sequence counts, and the opt-in ``prompt_join:
+  tokens`` and ``novelty: coverage`` described above.
+
+Compared with Carlini et al.: sampling uses ``top_k=50`` and ``top_p=0.95`` (they use top-n 40 without
+a nucleus filter), and prefixes are continued greedily (they sample).
 
 Every stage is cached under ``<output_dir>/artifacts`` keyed by its settings and its inputs, so an
 interrupted run resumes and a changed setting recomputes only the stages it affects.
@@ -76,9 +76,9 @@ import torch
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtractionAttack
-from leakpro.attacks.utils.extraction.coverage import KnownContent, novel_candidates, unique_passages
+from leakpro.attacks.utils.extraction.coverage import KnownContent, KnownWindows, novel_candidates, unique_passages
 from leakpro.attacks.utils.extraction.elasticsearch_verifier import ElasticsearchVerifier, connect
-from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, joint_text
+from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, join_prompt
 from leakpro.attacks.utils.extraction.finetune import (
     TokenWindowIndex,
     adapter_disabled,
@@ -205,6 +205,18 @@ class ExpansionConfig(BaseModel):
     t_start: float = Field(default=3.0, gt=0)
     t_end: float = Field(default=1.0, gt=0)
     decay_steps: int = Field(default=20, ge=1)
+    prompt_join: Literal["space", "tokens"] = Field(
+        default="space",
+        description="How full_text (what Phase 2 scores and verifies) is built: `space` joins the decoded prefix "
+                    "and continuation with a space, as in the thesis; `tokens` decodes prompt and generated tokens "
+                    "together, so a prefix cut inside a word does not split it",
+    )
+    novelty: Literal["window", "coverage"] = Field(
+        default="window",
+        description="S1-novel test: `window` (as in the thesis) keeps sequences with a verified window string that "
+                    "S0's exhaustive verification did not find; `coverage` keeps sequences that cover text or corpus "
+                    "words S0 does not (independent of where the window grid falls)",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -242,14 +254,12 @@ class MemorizationExtractionConfig(BaseModel):
     windowing: WindowingConfig = Field(default_factory=WindowingConfig)
     filter: FilterConfig = Field(default_factory=FilterConfig)
     attacker_verifier: Optional[VerifierConfig] = Field(default=None, description="Attacker-side corpus; feeds the attack")
-    audit_oracle: Optional[VerifierConfig] = Field(default=None, description="Real training data; only reported")
     expansion: Optional[ExpansionConfig] = Field(
         default_factory=ExpansionConfig,
         description="Phase 2, part of the attack (needs `attacker_verifier`); null runs Phase 1 only",
     )
     finetune: Optional[FinetuneConfig] = Field(default=None, description="Optional Phases 3-4; set to include them")
     generation_backend: Literal["auto", "hf", "torch"] = Field(default="auto", description="Generation backend")
-    store_text: Literal["full", "hash", "none"] = Field(default="full", description="Extracted text written to results")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -316,10 +326,9 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
             "detailed": "Phase 1 samples from BOS-only, temperature-decay and prefix-conditional prompts, ranks the "
                         "candidates by zlib entropy over log-perplexity and by the lowercase log-perplexity ratio, "
                         "and verifies the top fraction with 30-word windows (S0). Phase 2 re-prompts with anchors "
-                        "cut from S0 and keeps verified sequences that cover text S0 did not (S1-novel). "
+                        "cut from S0 and keeps verified sequences with windows S0 did not have (S1-novel). "
                         "Phases 3-4 (optional, white-box) LoRA-fine-tune on S0 and S1-novel and repeat Phase 1, "
-                        "dropping generations that overlap the fine-tuning data. An optional audit oracle reports "
-                        "how many outputs occur in the real training data without influencing the attack.",
+                        "dropping generations that overlap the fine-tuning data.",
         }
 
     def prepare_attack(self: Self) -> None:
@@ -330,7 +339,6 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         self.store = ArtifactStore(f"{self.output_dir}/artifacts")
         self.windowing = Windowing(**cfg.windowing.model_dump())
         self.attacker_verifier = build_verifier(cfg.attacker_verifier)
-        self.audit_oracle = build_verifier(cfg.audit_oracle)
         self.model_fingerprint = fingerprint_model(self.target_model)
         self.tokenizer_id = str(getattr(self.tokenizer, "name_or_path", type(self.tokenizer).__name__))
         self._peft = None
@@ -435,7 +443,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         text_of: str,
         attacker_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Select from the scored pools, verify with the attacker verifier, then evaluate with the oracle."""
+        """Select from the scored pools and verify the selection with the attacker verifier."""
         cfg, fcfg = self.configs, self.configs.filter
         pools = scored if fcfg.per_strategy else {"all": [c for cands in scored.values() for c in cands]}
         selected = [c for pool in pools.values() for c in select_top_union(pool, fcfg.top_percent, fcfg.metrics)]
@@ -446,13 +454,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
                                     attacker_mode or cfg.attacker_verifier.mode, "attacker_matches",
                                     f"{phase}-verify", text_of)
             selected, upstream_key = verified["candidates"], verified["key"]
-        attacker_key = upstream_key
-        if self.audit_oracle is not None:
-            # Evaluation only: runs on the selected candidates and is reported, never read by an attack stage.
-            # Keyed on the attacker stage too, because the cached records carry the attacker's matches.
-            selected = self._verify(selected, upstream_key, self.audit_oracle, cfg.audit_oracle.mode,
-                                    "oracle_matches", f"{phase}-oracle", text_of)["candidates"]
-        return {"key": attacker_key, "selected": selected}
+        return {"key": upstream_key, "selected": selected}
 
     # ------------------------------------------------------------------------------------ phases
 
@@ -494,10 +496,11 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         key = stage_key("generate", phase, ecfg.model_dump(), s0_key, self.seed, self.model_fingerprint,
                         self.tokenizer_id, self.configs.generation_backend, [a["tokens"] for a in anchors])
         gen = self._run_generator(generator, key, f"{phase}-generate")
-        # full_text is derived from the token ids, also for generations cached before joint decoding.
+        # full_text is rebuilt with the configured join, so cached generations serve either setting.
         for cand in gen["candidates"]:
-            cand.full_text = joint_text(self.tokenizer, cand.prompt_ids, cand.gen_ids)
-        gen = {"key": stage_key(gen["key"], "full_text: joint decode"), "candidates": gen["candidates"]}
+            cand.full_text = join_prompt(self.tokenizer, cand, ecfg.prompt_join)
+        if ecfg.prompt_join != "space":  # `space` is how generations were always stored: keep the old keys
+            gen = {"key": stage_key(gen["key"], f"full_text: {ecfg.prompt_join}"), "candidates": gen["candidates"]}
         sco = self._score(gen, generator.name, phase, "full_text")
         # S1 is verified on every window: the novelty test needs all of them.
         out = self._select_and_verify({generator.name: sco["candidates"]}, [sco["key"]], phase, "full_text",
@@ -506,7 +509,9 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         # Exhaustive verification of S0, on copies so Phase 1's records keep their first-match results.
         s0_all = self._verify(_copy(s0), s0_key, self.attacker_verifier, "all", "attacker_matches",
                               f"{PHASE_INITIAL}-verify-all", "continuation")["candidates"]
-        s1_novel = novel_candidates(s1, KnownContent(s0_all, "continuation", self.windowing.size))
+        known = (KnownContent(s0_all, "continuation", self.windowing.size) if ecfg.novelty == "coverage"
+                 else KnownWindows(s0_all))
+        s1_novel = novel_candidates(s1, known)
         extra = {"anchors": len(anchors), "novel": len(s1_novel),
                  "novel_unique": unique_passages(s1_novel, "full_text", self.windowing.size)}
         out["metrics"] = self._metrics({generator.name: gen["candidates"]}, {generator.name: sco["candidates"]},
@@ -566,7 +571,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
 
     def _keep(self: Self, phase: str, out: Dict[str, Any]) -> Dict[str, Dict[str, Optional[float]]]:
         """Store a phase's metrics and extracted records (replacing an earlier run of it)."""
-        records = [_extracted_record(c) for c in out["selected"] if c.attacker_matches or c.oracle_matches]
+        records = [_extracted_record(c) for c in out["selected"] if c.attacker_matches]
         self._outputs[phase] = {"metrics": out["metrics"], "extracted": records}
         return out["metrics"]
 
@@ -656,7 +661,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         metrics = {phase: self._outputs[phase]["metrics"] for phase in order if phase in self._outputs}
         extracted = [r for phase in order if phase in self._outputs for r in self._outputs[phase]["extracted"]]
         result = ExtractionResult("memorization_extraction", self.attack_id, self.configs.model_dump(), metrics,
-                                  extracted, store_text=self.configs.store_text)
+                                  extracted)
         logger.info("Memorization extraction finished\n" + result.summary())
         return result
 
@@ -681,12 +686,11 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         :func:`~leakpro.attacks.utils.extraction.coverage.unique_passages`), so one passage sampled many
         times counts once. The total's ``unique`` is computed over all strategies, not summed.
         """
-        has_attacker, has_oracle = self.attacker_verifier is not None, self.audit_oracle is not None
+        has_attacker = self.attacker_verifier is not None
         n = self.windowing.size
 
         def _row(gen: int, kept: int, sel: Sequence[Candidate]) -> Dict[str, Optional[float]]:
             verified = sum(1 for c in sel if c.attacker_matches) if has_attacker else None
-            oracle = sum(1 for c in sel if c.oracle_matches) if has_oracle else None
             return {
                 "generated": gen,
                 "kept": kept,
@@ -694,9 +698,6 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
                 "verified": verified,
                 "unique": unique_passages(sel, text_of, n) if has_attacker else None,
                 "extraction_rate": verified / gen if verified is not None and gen else None,
-                "oracle_verified": oracle,
-                "oracle_unique": unique_passages(sel, text_of, n, "oracle_matches") if has_oracle else None,
-                "oracle_rate": oracle / gen if oracle is not None and gen else None,
             }
 
         rows = {

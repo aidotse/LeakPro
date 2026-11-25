@@ -101,13 +101,10 @@ class Candidate:
         gen_ids: Token ids generated after the prompt.
         prompt_text: Decoded prompt (empty for BOS-only prompting).
         continuation: Decoded generated text. Phase 1 scores and verifies this.
-        full_text: Prompt and generated tokens decoded together (so a prompt cut inside a word does
-            not split it).
+        full_text: Prompt and continuation joined by a space (Phase 2: see ``ExpansionConfig.prompt_join``).
         scores: Filtering scores by name (``ppl``, ``zlib``, ``lowercase``, ...).
         selected_by: Filters that selected the candidate (``zlib``, ``lowercase``).
         attacker_matches: Windows confirmed by the attacker-side verifier.
-        oracle_matches: Windows confirmed by the auditor's oracle. Evaluation only: never read by
-            any attack stage.
         meta: Free-form extra information (batch index, prefix source, ...).
 
     """
@@ -123,7 +120,6 @@ class Candidate:
     scores: Dict[str, float] = field(default_factory=dict)
     selected_by: List[str] = field(default_factory=list)
     attacker_matches: List[Match] = field(default_factory=list)
-    oracle_matches: List[Match] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self: Self) -> Dict[str, Any]:
@@ -135,5 +131,5 @@ class Candidate:
         """Inverse of :meth:`to_dict`."""
         data = dict(data)
         data["attacker_matches"] = [Match(**m) for m in data.get("attacker_matches", [])]
-        data["oracle_matches"] = [Match(**m) for m in data.get("oracle_matches", [])]
+        data.pop("oracle_matches", None)  # written by earlier versions
         return cls(**data)

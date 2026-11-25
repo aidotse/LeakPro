@@ -4,6 +4,9 @@
 #
 """What verified candidates cover: Phase 2 novelty and unique-passage counts.
 
+Phase 2 novelty has two tests (``ExpansionConfig.novelty``): :class:`KnownWindows`, the thesis
+pipeline's comparison of window strings, and :class:`KnownContent`, which compares covered content.
+
 Window *strings* are a poor identity for memorized content. Windows start every ``stride`` words of
 the verified text, so the same passage shifted by a number of words that is not a multiple of the
 stride yields entirely different window strings. Both helpers here therefore work on what the
@@ -19,7 +22,7 @@ The text view catches what the corpus view misses when a corpus holds the same t
 one document (common in web corpora): a shifted window can then resolve to another copy.
 """
 
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 from leakpro.attacks.utils.extraction.records import Candidate, Match, normalize
 from leakpro.utils.import_helper import Self
@@ -60,6 +63,21 @@ def corpus_words(matches: Iterable[Match]) -> Set[Tuple[str, int]]:
     return {(m.doc_id, w) for m in matches for w in range(m.corpus_offset, m.corpus_offset + m.cand_end - m.cand_start)}
 
 
+class KnownWindows:
+    """Window strings verified for a set of candidates (Phase 1's S0, verified on every window).
+
+    A Phase 2 window is known when the same normalized string was verified for S0. The same text
+    shifted by a number of words that is not a multiple of the stride is therefore *not* known.
+    """
+
+    def __init__(self: Self, candidates: Sequence[Candidate]) -> None:
+        self.windows = {m.window for c in candidates for m in c.attacker_matches}
+
+    def is_known(self: Self, match: Match) -> bool:
+        """True when ``match``'s window string was verified for S0."""
+        return match.window in self.windows
+
+
 class KnownContent:
     """Content covered by a set of verified candidates (Phase 1's S0, verified on every window).
 
@@ -88,7 +106,9 @@ class KnownContent:
         return corpus_words([match]) <= self.words
 
 
-def novel_candidates(s1: Sequence[Candidate], known: KnownContent, novel_key: Optional[str] = "novel") -> List[Candidate]:
+def novel_candidates(
+    s1: Sequence[Candidate], known: Union[KnownWindows, KnownContent], novel_key: Optional[str] = "novel",
+) -> List[Candidate]:
     """S1 candidates with at least one verified window that ``known`` does not cover; marks ``meta[novel_key]``."""
     out = []
     for cand in s1:

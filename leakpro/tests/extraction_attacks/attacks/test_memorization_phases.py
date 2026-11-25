@@ -49,7 +49,7 @@ def _run(config: str) -> tuple:
 
 # ------------------------------------------------------------------------------------- Phase 2
 
-def _expansion_attack(tmp_path: Path, initial_tokens: int = 300) -> Dict:
+def _expansion_attack(tmp_path: Path, initial_tokens: int = 300, novelty: str = "window") -> Dict:
     corpus = _write_jsonl(tmp_path / "aux.jsonl", [{"doc_id": "aux-1", "text": f"Header. {SECRET} Footer."}])
     return {
         # S0: the continuation of "w0x ", i.e. SECRET from w1x on, up to `initial_tokens` characters in total
@@ -59,24 +59,31 @@ def _expansion_attack(tmp_path: Path, initial_tokens: int = 300) -> Dict:
         # "w1x ... w8x " is followed by "w8x w9x w10x ...": the repeated w8x moves the window grid by
         # one word, so the expansion's window strings differ from S0's although the text is the same.
         "expansion": {"anchor_tokens": 40, "prefix_lengths": [32], "gens_per_anchor": 4, "batch_size": 2,
-                      "max_tokens": 300},
+                      "max_tokens": 300, "novelty": novelty},
     }
 
 
-def test_expansion_of_text_s0_already_holds_is_not_novel(tmp_path: Path) -> None:
-    result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path)))
+@pytest.mark.parametrize(("novelty", "novel"), [("window", True), ("coverage", False)])
+def test_expansion_of_text_s0_already_holds(tmp_path: Path, novelty: str, novel: bool) -> None:
+    result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path, novelty=novelty)))
     assert result.metrics["initial"]["total"]["verified"] == 1
     exp = result.metrics["expansion"]["expansion"]
     assert exp["anchors"] == 1 and exp["generated"] == 4
     assert exp["verified"] == exp["selected"] >= 1
-    # every verified window is S0 text on a shifted grid: not novel
-    assert exp["novel"] == 0 and exp["novel_unique"] == 0
     assert exp["unique"] == 1
+    # Every verified window is S0 text on a grid shifted by one word: new as a window string (the
+    # thesis test, default), not new as content.
+    if novel:
+        assert exp["novel"] == exp["verified"] and exp["novel_unique"] == 1
+    else:
+        assert exp["novel"] == 0 and exp["novel_unique"] == 0
 
 
-def test_expansion_reaching_past_s0_is_novel(tmp_path: Path) -> None:
+@pytest.mark.parametrize("novelty", ["window", "coverage"])
+def test_expansion_reaching_past_s0_is_novel(tmp_path: Path, novelty: str) -> None:
     # S0 now ends at w39x (160 characters with the prefix); the expansion continues SECRET to w59x
-    result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path, initial_tokens=160)))
+    attack = _expansion_attack(tmp_path, initial_tokens=160, novelty=novelty)
+    result, _ = _run(_config(tmp_path, "ParrotLM", attack))
     assert result.metrics["initial"]["total"]["verified"] == 1
     exp = result.metrics["expansion"]["expansion"]
     assert exp["verified"] == exp["selected"] >= 1

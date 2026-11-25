@@ -6,6 +6,7 @@ import pytest
 
 from leakpro.attacks.utils.extraction.coverage import (
     KnownContent,
+    KnownWindows,
     merged_spans,
     novel_candidates,
     text_grams,
@@ -19,11 +20,9 @@ DOC = " ".join(WORDS)
 WINDOWING = Windowing(size=30, stride=5)
 
 
-def _cand(cid: str, text: str, verifier: InMemoryVerifier, mode: str = "all", field: str = "attacker_matches") -> Candidate:
-    cand = Candidate(id=cid, phase="expansion", strategy="expansion", prompt_ids=[], gen_ids=[], prompt_text="",
-                     continuation=text, full_text=text)
-    setattr(cand, field, verifier.verify(text, WINDOWING, mode))
-    return cand
+def _cand(cid: str, text: str, verifier: InMemoryVerifier, mode: str = "all") -> Candidate:
+    return Candidate(id=cid, phase="expansion", strategy="expansion", prompt_ids=[], gen_ids=[], prompt_text="",
+                     continuation=text, full_text=text, attacker_matches=verifier.verify(text, WINDOWING, mode))
 
 
 def _words(a: int, b: int) -> str:
@@ -35,14 +34,16 @@ def verifier() -> InMemoryVerifier:
     return InMemoryVerifier([("doc", DOC)])
 
 
-@pytest.mark.parametrize("start", [5, 1, 3])
-def test_a_shifted_substring_of_s0_is_not_novel(verifier: InMemoryVerifier, start: int) -> None:
-    # S0 = words 0..99, verified on every window; S1 = S0[start:90]. Comparing window strings flagged
-    # start=1 and start=3 as novel, because their windows fall on a different grid.
-    known = KnownContent([_cand("s0", _words(0, 100), verifier)], "full_text", WINDOWING.size)
+@pytest.mark.parametrize(("start", "window_novel"), [(5, False), (1, True), (3, True)])
+def test_a_shifted_substring_of_s0(verifier: InMemoryVerifier, start: int, window_novel: bool) -> None:
+    # S0 = words 0..99, verified on every window; S1 = S0[start:90]. Window strings (the thesis test)
+    # flag start=1 and start=3 as novel, because their windows fall on a different grid; covered
+    # content does not.
+    s0 = [_cand("s0", _words(0, 100), verifier)]
     s1 = _cand("s1", _words(start, 90), verifier)
     assert len(s1.attacker_matches) == 12
-    assert novel_candidates([s1], known) == []
+    assert bool(novel_candidates([s1], KnownWindows(s0))) is window_novel
+    assert novel_candidates([s1], KnownContent(s0, "full_text", WINDOWING.size)) == []
     assert s1.meta["novel"] is False
 
 
@@ -93,9 +94,3 @@ def test_unique_passages(verifier: InMemoryVerifier) -> None:
                   continuation=_words(0, 30), full_text=_words(0, 30),
                   attacker_matches=[Match("copy-2", 0, 0, 30, _words(0, 30))])
     assert unique_passages([a, b], "full_text", 30) == 1
-
-
-def test_unique_passages_of_the_oracle_field(verifier: InMemoryVerifier) -> None:
-    cands = [_cand(f"s{k}", _words(k, k + 40), verifier, mode="first", field="oracle_matches") for k in (0, 60)]
-    assert unique_passages(cands, "full_text", 30, field="oracle_matches") == 2
-    assert unique_passages(cands, "full_text", 30) == 0

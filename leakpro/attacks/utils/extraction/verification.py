@@ -9,13 +9,6 @@ A candidate is verified when at least one of its windows (see
 :func:`~leakpro.attacks.utils.extraction.records.normalize`, in a corpus document. The test is a
 plain substring test on the normalized texts (``window in document``), so a window may start or end
 inside a corpus word.
-
-The same verifier class serves two roles that must stay separate:
-
-* the **attacker verifier** checks candidates against a corpus the attacker owns, and its result
-  feeds later attack stages;
-* the **audit oracle** checks the attack's outputs against the real training data, and its result
-  is only reported.
 """
 
 import hashlib

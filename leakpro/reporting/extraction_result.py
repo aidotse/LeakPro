@@ -11,40 +11,16 @@ Saved files:
 
 * ``<output_dir>/data_objects/<attack_id>.json``: config and metrics (same place as MIA results).
 * ``<output_dir>/results/<attack_id>/result.json``: config and metrics.
-* ``<output_dir>/results/<attack_id>/extracted.jsonl``: one record per extracted sequence. How much
-  text it contains is set by ``store_text``: ``full`` (the text and its matched windows), ``hash``
-  (SHA-256 digests instead of text) or ``none`` (no text at all).
+* ``<output_dir>/results/<attack_id>/extracted.jsonl``: one record per extracted sequence, with its
+  text and matched windows.
 """
 
-import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from leakpro.reporting.audit_result import AuditResult, latex_escape
 from leakpro.utils.import_helper import Self
-
-StoreText = Literal["full", "hash", "none"]
-
-
-def _sha(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def redact(record: Dict[str, Any], store_text: StoreText) -> Dict[str, Any]:
-    """Apply the ``store_text`` policy to one extracted record."""
-    if store_text == "full":
-        return record
-    out = dict(record)
-    for key in ("prompt_text", "continuation", "full_text"):
-        if key in out:
-            out[key] = _sha(out[key]) if store_text == "hash" else None
-    for key in ("attacker_matches", "oracle_matches"):
-        out[key] = [
-            {**m, "window": _sha(m["window"]) if store_text == "hash" else None} for m in out.get(key, [])
-        ]
-    return out
-
 
 _PHASE_TITLES = {
     "initial": "Phase 1: initial extraction",
@@ -55,8 +31,7 @@ _PHASE_TITLES = {
 _COLUMNS = [
     ("anchors", "Anchors"), ("generated", "Generated"), ("overlap_removed", "Overlap removed"), ("kept", "Kept"),
     ("selected", "Selected"), ("verified", "Verified"), ("unique", "Unique"), ("extraction_rate", "Rate"),
-    ("novel", "Novel"), ("novel_unique", "Novel unique"), ("oracle_verified", "Oracle verified"),
-    ("oracle_unique", "Oracle unique"), ("oracle_rate", "Oracle rate"),
+    ("novel", "Novel"), ("novel_unique", "Novel unique"),
 ]
 
 
@@ -78,7 +53,6 @@ class ExtractionResult(AuditResult):
         config: The attack config as a dict.
         metrics: ``{phase: {strategy | "total": {count name: value}}}``.
         extracted: Records of the sequences the attacker verifier confirmed.
-        store_text: How much extracted text is written to disk.
 
     """
 
@@ -89,7 +63,6 @@ class ExtractionResult(AuditResult):
         config: Dict[str, Any],
         metrics: Dict[str, Dict[str, Dict[str, Optional[float]]]],
         extracted: List[Dict[str, Any]],
-        store_text: StoreText = "full",
     ) -> None:
         self.name = name
         self.result_name = name
@@ -97,7 +70,6 @@ class ExtractionResult(AuditResult):
         self.config = config
         self.metrics = metrics
         self.extracted = extracted
-        self.store_text = store_text
 
     report_title = "Training-data extraction"
 
@@ -116,7 +88,7 @@ class ExtractionResult(AuditResult):
         (result_dir / "result.json").write_text(summary, encoding="utf-8")
         with (result_dir / "extracted.jsonl").open("w", encoding="utf-8") as f:
             for record in self.extracted:
-                f.write(json.dumps(redact(record, self.store_text), ensure_ascii=False) + "\n")
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     @classmethod
     def load(cls, result_dir: str) -> "ExtractionResult":  # noqa: ANN102
@@ -128,8 +100,7 @@ class ExtractionResult(AuditResult):
         if extracted_path.exists():
             with extracted_path.open(encoding="utf-8") as f:
                 extracted = [json.loads(line) for line in f if line.strip()]
-        return cls(data["name"], data["id"], data["config"], data["metrics"], extracted,
-                   store_text=data["config"].get("store_text", "full"))
+        return cls(data["name"], data["id"], data["config"], data["metrics"], extracted)
 
     def summary(self: Self) -> str:
         """Human-readable table of the counts."""
@@ -153,8 +124,7 @@ class ExtractionResult(AuditResult):
         """LaTeX report section: one table of counts per phase for each result (no extracted text)."""
         latex = (
             "\nA sequence counts as extracted when one of its word windows occurs verbatim in the attacker's "
-            "reference corpus (\\emph{Verified}). \\emph{Oracle verified} counts the same selected sequences "
-            "found in the real training data; it is reported only and never used by the attack. "
+            "reference corpus (\\emph{Verified}). "
             "\\emph{Unique} counts distinct passages: verified sequences whose matches share corpus words or a "
             "window-length text count once. "
             "Rates are verified sequences over generated sequences.\n"
@@ -184,7 +154,6 @@ class ExtractionResult(AuditResult):
                 )
             latex += (
                 f"\nExtracted sequences: {len(res.extracted)}, listed in "
-                f"\\texttt{{results/{latex_escape(res.id)}/extracted.jsonl}} "
-                f"(text stored: {latex_escape(res.store_text)}).\n"
+                f"\\texttt{{results/{latex_escape(res.id)}/extracted.jsonl}}.\n"
             )
         return latex
