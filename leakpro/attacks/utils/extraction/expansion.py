@@ -9,12 +9,13 @@
 2. :class:`AnchorGenerator` prompts with a random-length prefix of each anchor (one length per batch,
    from ``prefix_lengths``) and samples ``gens_per_anchor`` continuations with a temperature that
    decays from ``t_start``. Every generation is ``max_tokens`` long in total (prefix included).
-3. After filtering and verification (on prefix + continuation), :func:`novel_candidates` keeps the
-   sequences with at least one verified window that Phase 1's exhaustive verification did not find.
+3. After filtering and verification (on prefix + continuation, decoded together so a prefix cut inside
+   a word does not split it), :func:`~leakpro.attacks.utils.extraction.coverage.novel_candidates` keeps
+   the sequences with a verified window that S0 does not already cover (see ``coverage``).
 """
 
 import math
-from typing import Dict, List, Literal, Optional, Sequence, Set
+from typing import Dict, List, Literal, Sequence
 
 import numpy as np
 from torch import nn
@@ -117,7 +118,6 @@ class AnchorGenerator:
                               backend)
         out = []
         for row, ids in enumerate(new):
-            continuation = tok.decode(ids, skip_special_tokens=True).strip()
             out.append(Candidate(
                 id=f"{self.phase}-{anchor_index:05d}-{rep * cfg.batch_size + row:04d}",
                 phase=self.phase,
@@ -125,26 +125,18 @@ class AnchorGenerator:
                 prompt_ids=list(prompt),
                 gen_ids=list(ids),
                 prompt_text=prefix_text,
-                continuation=continuation,
-                full_text=f"{prefix_text} {continuation}".strip(),
+                continuation=tok.decode(ids, skip_special_tokens=True).strip(),
+                full_text=joint_text(tok, prompt, ids),
                 meta={"batch": batch_index, "anchor": anchor_index, "prefix_len_tokens": length,
                       "parent_id": anchor["parent_id"], "parent_strategy": anchor["parent_strategy"]},
             ))
         return out
 
 
-def known_windows(candidates: Sequence[Candidate]) -> Set[str]:
-    """Every verified (normalized) window of ``candidates``."""
-    return {m.window for c in candidates for m in c.attacker_matches}
+def joint_text(tok: TokenizerLike, prompt_ids: Sequence[int], gen_ids: Sequence[int]) -> str:
+    """Prompt and generation decoded as one sequence.
 
-
-def novel_candidates(s1: Sequence[Candidate], known: Set[str], novel_key: Optional[str] = "novel") -> List[Candidate]:
-    """S1 candidates with at least one verified window outside ``known``; marks ``meta[novel_key]`` on all."""
-    out = []
-    for cand in s1:
-        novel = any(m.window not in known for m in cand.attacker_matches)
-        if novel_key:
-            cand.meta[novel_key] = novel
-        if novel:
-            out.append(cand)
-    return out
+    Decoding them separately and joining with a space splits a word in two whenever the prompt was cut
+    inside it, which shifts every later word index (and with it the verification windows).
+    """
+    return tok.decode([*prompt_ids, *gen_ids], skip_special_tokens=True).strip()

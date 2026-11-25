@@ -54,8 +54,9 @@ _PHASE_TITLES = {
 # (metric key, column header); a column appears only when some row of the phase has a value for it.
 _COLUMNS = [
     ("anchors", "Anchors"), ("generated", "Generated"), ("overlap_removed", "Overlap removed"), ("kept", "Kept"),
-    ("selected", "Selected"), ("verified", "Verified"), ("extraction_rate", "Rate"),
-    ("novel", "Novel"), ("oracle_verified", "Oracle verified"), ("oracle_rate", "Oracle rate"),
+    ("selected", "Selected"), ("verified", "Verified"), ("unique", "Unique"), ("extraction_rate", "Rate"),
+    ("novel", "Novel"), ("novel_unique", "Novel unique"), ("oracle_verified", "Oracle verified"),
+    ("oracle_unique", "Oracle unique"), ("oracle_rate", "Oracle rate"),
 ]
 
 
@@ -136,13 +137,13 @@ class ExtractionResult(AuditResult):
         for phase, by_strategy in self.metrics.items():
             lines.append(f"{phase}:")
             for strategy, m in by_strategy.items():
-                verified = m.get("verified")
+                verified, unique = m.get("verified"), m.get("unique")
                 rate = m.get("extraction_rate")
-                extras = "".join(f"  {k} {m[k]}" for k in ("overlap_removed", "anchors", "novel", "finetune_corpus")
-                                 if k in m)
+                extras = "".join(f"  {k} {m[k]}" for k in ("overlap_removed", "anchors", "novel", "novel_unique",
+                                                           "finetune_corpus") if k in m)
                 lines.append(
                     f"  {strategy:<12} generated {m['generated']:>6}  kept {m['kept']:>6}  selected {m['selected']:>5}  "
-                    f"verified {'-' if verified is None else verified:>5}  "
+                    f"verified {'-' if verified is None else verified:>5}  unique {'-' if unique is None else unique:>5}  "
                     f"rate {'-' if rate is None else f'{100 * rate:.2f}%'}{extras}"
                 )
         return "\n".join(lines)
@@ -154,6 +155,8 @@ class ExtractionResult(AuditResult):
             "\nA sequence counts as extracted when one of its word windows occurs verbatim in the attacker's "
             "reference corpus (\\emph{Verified}). \\emph{Oracle verified} counts the same selected sequences "
             "found in the real training data; it is reported only and never used by the attack. "
+            "\\emph{Unique} counts distinct passages: verified sequences whose matches share corpus words or a "
+            "window-length text count once. "
             "Rates are verified sequences over generated sequences.\n"
         )
         seen = set()

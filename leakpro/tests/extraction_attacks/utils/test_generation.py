@@ -87,7 +87,8 @@ def test_conditional_rows_are_cut_to_max_tokens_in_total() -> None:
     gen = StrategyGenerator("conditional", 2, cfg, tok, prefixes)
     cands = gen.generate_batch(0, ParrotLM(), seed=1, device=CPU, backend="torch")
     assert [len(c.prompt_ids) + len(c.gen_ids) for c in cands] == [40, 40]
-    assert [c.full_text for c in cands] == [f"{SECRET[:5]} {SECRET[5:40]}".strip(), f"{SECRET[:20]} {SECRET[20:40]}".strip()]
+    # prompt and generation are decoded together: the prefix "w0x w" ends inside a word, which stays whole
+    assert [c.full_text for c in cands] == [SECRET[:40].strip()] * 2
     assert cands[0].continuation == SECRET[5:40]
 
 

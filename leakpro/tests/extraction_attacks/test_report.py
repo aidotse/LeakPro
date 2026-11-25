@@ -95,7 +95,7 @@ def test_run_audit_with_pdf(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump(config))
     LeakPro(ExtractionInputHandler, str(path)).run_audit(create_pdf=True)
     tex = (tmp_path / "out" / "results" / "LeakPro_output.tex").read_text()
-    assert "\\section{Training-data extraction}" in tex and "baseline & 2 & 1 & 1 & 1 & 50.00\\%" in tex
+    assert "\\section{Training-data extraction}" in tex and "baseline & 2 & 1 & 1 & 1 & 1 & 50.00\\%" in tex
 
 
 @pytest.mark.skipif(shutil.which("pdflatex") is None, reason="needs pdflatex (installed in CI)")

@@ -21,9 +21,11 @@ Phases 3 and 4 are an optional, stronger attack that needs the weights.
 1. Cut anchors of up to 50 tokens from S0, starting at each sequence's first verified window.
 2. Prompt with a random 30-50 token prefix of each anchor and sample 150 continuations per anchor
    (temperature decaying from 3 to 1).
-3. Filter and verify prefix + continuation (all windows) -> **S1**.
-4. Keep the S1 sequences with at least one window that the exhaustive (all-window) verification of S0
-   did not find -> **S1-novel**.
+3. Filter and verify prefix + continuation, decoded together (all windows) -> **S1**.
+4. Keep the S1 sequences with at least one verified window that S0 does not cover -> **S1-novel**. A
+   window is covered when its text lies inside S0's verified text (at any word shift) or its corpus
+   words all lie inside S0's matches; S0 is verified on every window for this. Window strings alone
+   would not do: the same text shifted by a word gives different windows.
 
 **Phase 3, fine-tuning** (``finetune`` set): LoRA continual pre-training on S0 ∪ S1-novel (texts of at
 least 20 words, normalized-deduplicated, shuffled).
@@ -32,6 +34,9 @@ least 20 words, normalized-deduplicated, shuffled).
 generation whose generated text (without the prompt) shares any 30-token window with the fine-tuning
 corpus is dropped *before* filtering (both sides lowercased and whitespace-collapsed);
 filtering scores with the base model; verification as in Phase 1 -> **S_new**.
+
+**Counts.** Every phase reports sequences (``verified``) and distinct passages (``unique``): verified
+sequences whose matches share corpus words or a ``windowing.size``-word text belong to one passage.
 
 **Evaluation** (auditor only): an optional audit oracle checks the selected candidates of every phase
 against the real training data. Its verdicts are reported and never fed back into the attack.
@@ -54,6 +59,9 @@ Where this implementation differs, so the numbers are not read as a reproduction
   (top-n) from the prefixes.
 - *Fine-tuning*: plain LoRA on the unquantized model with a 10-step warm-up. The thesis used QLoRA
   (4-bit base model).
+- *Phase 2 novelty*: decided on covered text and corpus words. The thesis compared window strings
+  with Phase 1's exhaustive window set, which depends on where the window grid falls.
+- *Unique counts*: reported next to the sequence counts; the thesis reports sequences.
 - *Phase 4 overlap*: only the generated text is compared with the fine-tuning corpus, so a prefix that
   happens to be fine-tuning text does not drop the generation. The thesis compared the whole sequence.
 
@@ -67,8 +75,9 @@ import torch
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtractionAttack
+from leakpro.attacks.utils.extraction.coverage import KnownContent, novel_candidates, unique_passages
 from leakpro.attacks.utils.extraction.elasticsearch_verifier import ElasticsearchVerifier, connect
-from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, known_windows, novel_candidates
+from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, joint_text
 from leakpro.attacks.utils.extraction.finetune import (
     TokenWindowIndex,
     adapter_disabled,
@@ -305,7 +314,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
             "detailed": "Phase 1 samples from BOS-only, temperature-decay and prefix-conditional prompts, ranks the "
                         "candidates by zlib entropy over log-perplexity and by the lowercase log-perplexity ratio, "
                         "and verifies the top fraction with 30-word windows (S0). Phase 2 re-prompts with anchors "
-                        "cut from S0 and keeps verified sequences with windows S0 did not contain (S1-novel). "
+                        "cut from S0 and keeps verified sequences that cover text S0 did not (S1-novel). "
                         "Phases 3-4 (optional, white-box) LoRA-fine-tune on S0 and S1-novel and repeat Phase 1, "
                         "dropping generations that overlap the fine-tuning data. An optional audit oracle reports "
                         "how many outputs occur in the real training data without influencing the attack.",
@@ -468,7 +477,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         extra = None
         if overlap is not None:
             extra = {name: {"overlap_removed": len(generated[name]) - len(after_overlap[name])} for name in generated}
-        out["metrics"] = self._metrics(generated, scored, out["selected"], extra)
+        out["metrics"] = self._metrics(generated, scored, out["selected"], extra, text_of=text_of)
         return out
 
     def _expansion_phase(self: Self, s0: List[Candidate], s0_key: str) -> Dict[str, Any]:
@@ -482,6 +491,10 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         key = stage_key("generate", phase, ecfg.model_dump(), s0_key, self.seed, self.model_fingerprint,
                         self.tokenizer_id, self.configs.generation_backend, [a["tokens"] for a in anchors])
         gen = self._run_generator(generator, key, f"{phase}-generate")
+        # full_text is derived from the token ids, also for generations cached before joint decoding.
+        for cand in gen["candidates"]:
+            cand.full_text = joint_text(self.tokenizer, cand.prompt_ids, cand.gen_ids)
+        gen = {"key": stage_key(gen["key"], "full_text: joint decode"), "candidates": gen["candidates"]}
         sco = self._score(gen, generator.name, phase, "full_text")
         # S1 is verified on every window: the novelty test needs all of them.
         out = self._select_and_verify({generator.name: sco["candidates"]}, [sco["key"]], phase, "full_text",
@@ -490,9 +503,11 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         # Exhaustive verification of S0, on copies so Phase 1's records keep their first-match results.
         s0_all = self._verify(_copy(s0), s0_key, self.attacker_verifier, "all", "attacker_matches",
                               f"{PHASE_INITIAL}-verify-all", "continuation")["candidates"]
-        s1_novel = novel_candidates(s1, known_windows(s0_all))
+        s1_novel = novel_candidates(s1, KnownContent(s0_all, "continuation", self.windowing.size))
+        extra = {"anchors": len(anchors), "novel": len(s1_novel),
+                 "novel_unique": unique_passages(s1_novel, "full_text", self.windowing.size)}
         out["metrics"] = self._metrics({generator.name: gen["candidates"]}, {generator.name: sco["candidates"]},
-                                       out["selected"], {generator.name: {"anchors": len(anchors), "novel": len(s1_novel)}})
+                                       out["selected"], {generator.name: extra}, text_of="full_text")
         out["s1_novel"] = s1_novel
         return out
 
@@ -655,9 +670,16 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         scored: Dict[str, Sequence[Candidate]],
         selected: Sequence[Candidate],
         extra: Optional[Dict[str, Dict[str, int]]] = None,
+        text_of: str = "continuation",
     ) -> Dict[str, Dict[str, Optional[float]]]:
-        """Counts per strategy and in total (``extra`` adds per-strategy counts, summed into the total)."""
+        """Counts per strategy and in total (``extra`` adds per-strategy counts, summed into the total).
+
+        ``verified`` counts sequences; ``unique`` counts the distinct passages among them (see
+        :func:`~leakpro.attacks.utils.extraction.coverage.unique_passages`), so one passage sampled many
+        times counts once. The total's ``unique`` is computed over all strategies, not summed.
+        """
         has_attacker, has_oracle = self.attacker_verifier is not None, self.audit_oracle is not None
+        n = self.windowing.size
 
         def _row(gen: int, kept: int, sel: Sequence[Candidate]) -> Dict[str, Optional[float]]:
             verified = sum(1 for c in sel if c.attacker_matches) if has_attacker else None
@@ -667,8 +689,10 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
                 "kept": kept,
                 "selected": len(sel),
                 "verified": verified,
+                "unique": unique_passages(sel, text_of, n) if has_attacker else None,
                 "extraction_rate": verified / gen if verified is not None and gen else None,
                 "oracle_verified": oracle,
+                "oracle_unique": unique_passages(sel, text_of, n, "oracle_matches") if has_oracle else None,
                 "oracle_rate": oracle / gen if oracle is not None and gen else None,
             }
 

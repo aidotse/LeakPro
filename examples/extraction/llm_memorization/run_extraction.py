@@ -153,11 +153,15 @@ def main() -> None:
         value = result.metrics.get(phase, {}).get("total", {}).get(key)
         return "not run yet" if value is None else value
 
-    print(f"S0 (Phase 1 verified):    {total('initial', 'verified')}")
+    def counts(phase: str, key: str, unique_key: str) -> str:
+        value = total(phase, key)
+        return value if isinstance(value, str) else f"{value} sequences, {total(phase, unique_key)} unique passages"
+
+    print(f"S0 (Phase 1 verified):    {counts('initial', 'verified', 'unique')}")
     if 2 in configured:
-        print(f"S1-novel (Phase 2):       {total('expansion', 'novel')}")
+        print(f"S1-novel (Phase 2):       {counts('expansion', 'novel', 'novel_unique')}")
     if 4 in configured:
-        print(f"S_new (Phase 4 verified): {total('finetuned', 'verified')}")
+        print(f"S_new (Phase 4 verified): {counts('finetuned', 'verified', 'unique')}")
     if last < configured[-1]:
         done = f"Phase {last}" if last == 1 else f"Phases 1-{last}"
         print(f"{done} done. Next: python run_extraction.py --phase {configured[configured.index(last) + 1]}")

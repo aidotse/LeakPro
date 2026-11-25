@@ -403,7 +403,7 @@ class StrategyGenerator:
                 gen_ids=list(ids),
                 prompt_text=prompt_text,
                 continuation=continuation,
-                full_text=f"{prompt_text} {continuation}".strip(),
+                full_text=tok.decode([*prompt, *ids], skip_special_tokens=True).strip(),
                 meta={"batch": batch_index},
             ))
         return candidates

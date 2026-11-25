@@ -13,7 +13,7 @@ lowercasing and collapsing whitespace) in a reference corpus.
 | Phase | Access | What it does | Config key |
 |---|---|---|---|
 | 1. Initial extraction | black box | BOS-only sampling, temperature-decay sampling and greedy continuation of corpus prefixes; rank by zlib and lowercase membership scores; verify the top 5% per strategy → **S0** | `initial` |
-| 2. Expansion | black box | re-prompt with 30-50 token anchors cut from S0, 150 samples per anchor; verify; keep sequences with windows S0 did not have → **S1-novel** | `expansion` |
+| 2. Expansion | black box | re-prompt with 30-50 token anchors cut from S0, 150 samples per anchor; verify; keep sequences that cover text S0 did not → **S1-novel** | `expansion` |
 | 3. Fine-tuning *(optional)* | weights | LoRA continual pre-training on S0 ∪ S1-novel | `finetune` |
 | 4. Re-extraction *(optional)* | weights | Phase 1 again on the tuned model; drop generations whose generated text shares a 30-token window with the fine-tuning data, before filtering → **S_new** | `finetune` |
 
@@ -38,6 +38,8 @@ This implementation differs from those works in these ways:
 | Sampling (`baseline`, `temp_decay`) | `top_k=50`, `top_p=0.95` | `top_p=0.95` | top-n 40, no nucleus filter |
 | Prefixes (`conditional`) | greedy | greedy | sampled (top-n) |
 | Fine-tuning | LoRA, unquantized model, 10-step warm-up | QLoRA (4-bit base model) | n/a |
+| Phase 2 novelty | covered text and corpus words | window strings vs. Phase 1's window set | n/a |
+| Counts | sequences and unique passages | sequences | unique examples |
 | Phase 4 overlap check | generated text only | whole sequence | n/a |
 
 The **attacker verifier** (`attacker_verifier`) is a public corpus the attacker believes resembles the

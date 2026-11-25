@@ -49,35 +49,48 @@ def _run(config: str) -> tuple:
 
 # ------------------------------------------------------------------------------------- Phase 2
 
-def _expansion_attack(tmp_path: Path) -> Dict:
+def _expansion_attack(tmp_path: Path, initial_tokens: int = 300) -> Dict:
     corpus = _write_jsonl(tmp_path / "aux.jsonl", [{"doc_id": "aux-1", "text": f"Header. {SECRET} Footer."}])
     return {
-        # S0: the continuation of "w0x ", i.e. SECRET from w1x on; its windows start at w1x, w6x, w11x, ...
-        "initial": [{"type": "conditional", "n": 1, "batch_size": 1, "max_tokens": 300}],
+        # S0: the continuation of "w0x ", i.e. SECRET from w1x on, up to `initial_tokens` characters in total
+        "initial": [{"type": "conditional", "n": 1, "batch_size": 1, "max_tokens": initial_tokens}],
         "attacker_verifier": {"path": corpus},
         # The anchor starts at w1x. ParrotLM continues by position, so the 32-character prefix
-        # "w1x ... w8x " is followed by "w8x w9x w10x ...": the window at w10x is verified and was
-        # not among S0's windows, so the sequence is novel.
+        # "w1x ... w8x " is followed by "w8x w9x w10x ...": the repeated w8x moves the window grid by
+        # one word, so the expansion's window strings differ from S0's although the text is the same.
         "expansion": {"anchor_tokens": 40, "prefix_lengths": [32], "gens_per_anchor": 4, "batch_size": 2,
                       "max_tokens": 300},
     }
 
 
-def test_expansion_finds_novel_windows(tmp_path: Path) -> None:
+def test_expansion_of_text_s0_already_holds_is_not_novel(tmp_path: Path) -> None:
     result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path)))
     assert result.metrics["initial"]["total"]["verified"] == 1
     exp = result.metrics["expansion"]["expansion"]
     assert exp["anchors"] == 1 and exp["generated"] == 4
     assert exp["verified"] == exp["selected"] >= 1
+    # every verified window is S0 text on a shifted grid: not novel
+    assert exp["novel"] == 0 and exp["novel_unique"] == 0
+    assert exp["unique"] == 1
+
+
+def test_expansion_reaching_past_s0_is_novel(tmp_path: Path) -> None:
+    # S0 now ends at w39x (160 characters with the prefix); the expansion continues SECRET to w59x
+    result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path, initial_tokens=160)))
+    assert result.metrics["initial"]["total"]["verified"] == 1
+    exp = result.metrics["expansion"]["expansion"]
+    assert exp["verified"] == exp["selected"] >= 1
     assert exp["novel"] == exp["verified"]
+    assert exp["novel_unique"] == exp["unique"] == 1  # the same continuation sampled several times
     assert result.metrics["expansion"]["total"]["novel"] == exp["novel"]
 
     records = [r for r in result.extracted if r["phase"] == "expansion"]
     assert len(records) == exp["verified"]
     record = records[0]
     assert record["prompt_text"].startswith("w1x w2x") and record["meta"]["novel"] is True
-    assert record["full_text"] == f"{record['prompt_text']} {record['continuation']}".strip()
-    # every window is reported (exhaustive verification), the first one at w10x
+    assert record["full_text"].split()[7:10] == ["w8x", "w8x", "w9x"]
+    # every window is reported (exhaustive verification); the windows across the repeated w8x do not
+    # verify, so the first verified one starts at w10x
     windows = [m["window"] for m in record["attacker_matches"]]
     assert len(windows) > 1 and windows[0].startswith("w10x w11x")
     # Phase 1's record keeps its first-match result

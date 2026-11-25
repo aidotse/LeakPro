@@ -101,7 +101,8 @@ class Candidate:
         gen_ids: Token ids generated after the prompt.
         prompt_text: Decoded prompt (empty for BOS-only prompting).
         continuation: Decoded generated text. Phase 1 scores and verifies this.
-        full_text: Prompt and continuation joined by a space.
+        full_text: Prompt and generated tokens decoded together (so a prompt cut inside a word does
+            not split it).
         scores: Filtering scores by name (``ppl``, ``zlib``, ``lowercase``, ...).
         selected_by: Filters that selected the candidate (``zlib``, ``lowercase``).
         attacker_matches: Windows confirmed by the attacker-side verifier.

@@ -77,14 +77,16 @@ def test_extraction_audit_end_to_end(tmp_path: Path) -> None:
     m = result.metrics["initial"]
     for strategy in ("baseline", "temp_decay"):
         # all N generations are SECRET: one survives dedupe, it is selected and verified
-        assert m[strategy] == {"generated": N, "kept": 1, "selected": 1, "verified": 1, "extraction_rate": 1 / N,
-                               "oracle_verified": 0, "oracle_rate": 0.0}
+        assert m[strategy] == {"generated": N, "kept": 1, "selected": 1, "verified": 1, "unique": 1,
+                               "extraction_rate": 1 / N, "oracle_verified": 0, "oracle_unique": 0, "oracle_rate": 0.0}
     # conditional continuations differ per prefix (each starts where its prefix ends); top 1 by zlib and
     # top 1 by lowercase may be different candidates, and every continuation is part of SECRET
     cond = m["conditional"]
     assert cond["generated"] == N and cond["kept"] == N
     assert cond["selected"] in (1, 2) and cond["verified"] == cond["selected"]
     assert m["total"]["generated"] == 3 * N and m["total"]["verified"] == 2 + cond["selected"]
+    # every verified sequence is a piece of the one SECRET passage: one unique passage in total
+    assert m["total"]["unique"] == 1
 
     assert len(result.extracted) == 2 + cond["selected"]
     record = next(r for r in result.extracted if r["strategy"] == "baseline")

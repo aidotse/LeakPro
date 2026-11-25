@@ -3,7 +3,7 @@
 import torch
 
 from leakpro.attacks.extraction_attacks.memorization_extraction import ExpansionConfig
-from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, known_windows, novel_candidates
+from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, joint_text
 from leakpro.attacks.utils.extraction.records import Candidate, Match
 from leakpro.tests.extraction_attacks.fixtures import BOS, SECRET, CharTokenizer, ParrotLM
 
@@ -44,7 +44,7 @@ def test_anchor_generator_batches_prefixes_and_lengths() -> None:
     assert len(cand.gen_ids) == 60 - (n + 1)  # min_new_tokens fills the budget exactly
     assert SECRET.startswith(cand.prompt_text)
     assert SECRET.startswith(cand.prompt_text + cand.continuation)
-    assert cand.full_text == f"{cand.prompt_text} {cand.continuation}".strip()
+    assert cand.full_text == joint_text(tok, cand.prompt_ids, cand.gen_ids)
     assert cand.meta["anchor"] == 0 and cand.strategy == "expansion"
 
 
@@ -55,10 +55,14 @@ def test_prefix_longer_than_the_budget_gives_an_empty_batch() -> None:
     assert AnchorGenerator([anchor], cfg, tok).generate_batch(0, ParrotLM(), 0, torch.device("cpu"), "torch") == []
 
 
-def test_novelty_needs_a_window_outside_the_known_set() -> None:
-    text = "aa bb cc dd ee ff"
-    known = known_windows([_cand("s0", text, [0, 1])])
-    s1 = [_cand("old", text, [1]), _cand("new", text, [1, 3]), _cand("none", text, [])]
-    novel = novel_candidates(s1, known)
-    assert [c.id for c in novel] == ["new"]
-    assert [c.meta["novel"] for c in s1] == [False, True, False]
+def test_a_prefix_cut_inside_a_word_does_not_split_it() -> None:
+    # 30 characters of the anchor end inside a word ("... w7x w8"); ParrotLM continues with "x w8x ...".
+    # Joining the decoded prefix and continuation with a space would give the words "w8" and "x".
+    tok = CharTokenizer()
+    anchor = {"tokens": tok.encode(SECRET[4:], add_special_tokens=False)[:40], "parent_id": "p", "parent_strategy": "b"}
+    cfg = ExpansionConfig(prefix_lengths=[30], gens_per_anchor=1, batch_size=1, max_tokens=80, top_k=None)
+    (cand,) = AnchorGenerator([anchor], cfg, tok).generate_batch(0, ParrotLM(), 0, torch.device("cpu"), "torch")
+    assert cand.prompt_text.endswith(" w8") and cand.continuation.startswith("x ")
+    words = cand.full_text.split()
+    assert all(w.startswith("w") and w.endswith("x") for w in words), words
+    assert words[:8] == [f"w{i}x" for i in range(1, 9)]
