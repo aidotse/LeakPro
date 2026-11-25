@@ -31,12 +31,14 @@ _PHASE_TITLES = {
     "initial": "Phase 1: initial extraction",
     "expansion": "Phase 2: expansion",
     "finetuned": "Phase 4: re-extraction after fine-tuning",
+    "finetuned_control": "Phase 4 control: Phase 1's generations (adapter off), same overlap removal and selection",
 }
 # (metric key, column header); a column appears only when some row of the phase has a value for it.
 _COLUMNS = [
     ("anchors", "Anchors"), ("generated", "Generated"), ("overlap_removed", "Overlap removed"), ("kept", "Kept"),
     ("selected", "Selected"), ("verified", "Verified"), ("unique", "Unique"), ("extraction_rate", "Rate"),
     ("novel", "Novel"), ("novel_unique", "Novel unique"),
+    ("in_phase1_text", "Same text in Phase 1"), ("in_phase1_window", "Window in Phase 1"),
 ]
 
 
@@ -136,7 +138,8 @@ class ExtractionResult(AuditResult):
                 verified, unique = m.get("verified"), m.get("unique")
                 rate = m.get("extraction_rate")
                 extras = "".join(f"  {k} {m[k]}" for k in ("overlap_removed", "anchors", "novel", "novel_unique",
-                                                           "finetune_corpus") if k in m)
+                                                           "in_phase1_text", "in_phase1_window", "finetune_corpus")
+                                 if k in m)
                 lines.append(
                     f"  {strategy:<12} generated {m['generated']:>6}  kept {m['kept']:>6}  selected {m['selected']:>5}  "
                     f"verified {'-' if verified is None else verified:>5}  unique {'-' if unique is None else unique:>5}  "

@@ -165,6 +165,11 @@ def main() -> None:
         print(f"S1-novel (Phase 2):       {counts('expansion', 'novel', 'novel_unique')}")
     if 4 in configured:
         print(f"S_new (Phase 4 verified): {counts('finetuned', 'verified', 'unique')}")
+        if "finetuned" in result.metrics:
+            print(f"  already in Phase 1 pool: {total('finetuned', 'in_phase1_window')} (a verified window), "
+                  f"{total('finetuned', 'in_phase1_text')} (same text)")
+        if "finetuned_control" in result.metrics:
+            print(f"Adapter-off control:      {counts('finetuned_control', 'verified', 'unique')}")
     if last < configured[-1]:
         done = f"Phase {last}" if last == 1 else f"Phases 1-{last}"
         print(f"{done} done. Next: python run_extraction.py --phase {configured[configured.index(last) + 1]}")

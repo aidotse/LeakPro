@@ -196,6 +196,29 @@ def test_finetune_and_reextract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert again.metrics == result.metrics
 
 
+def test_seed_checks_report_phase1_overlap_and_an_adapter_off_control(tmp_path: Path) -> None:
+    pytest.importorskip("peft")
+    _run(_config(tmp_path, "TinyGPT2LM", _finetune_attack(tmp_path, attacker=False), name="gen.yaml"))
+    _corpus_from_cached_generations(tmp_path)
+    attack = _finetune_attack(tmp_path)
+    # LoRA's B matrices start at zero, so an adapter trained at lr 1e-12 leaves the model unchanged:
+    # Phase 4 then regenerates Phase 1's pool with the same seeds, which is exactly what the control uses.
+    attack["finetune"]["lr"] = 1e-12
+    result, _ = _run(_config(tmp_path, "TinyGPT2LM", attack))
+    ft, control = result.metrics["finetuned"], result.metrics["finetuned_control"]
+    for key in ("generated", "overlap_removed", "kept", "selected", "verified", "unique"):
+        assert control["total"][key] == ft["total"][key], key
+    # every S_new sequence is a Phase 1 generation here
+    assert ft["total"]["in_phase1_text"] == ft["total"]["in_phase1_window"] == ft["total"]["verified"]
+    assert list(result.metrics) == ["initial", "finetuned", "finetuned_control"]
+    assert not [r for r in result.extracted if r["phase"] == "finetuned_control"]  # reported, not extracted
+
+    off = _finetune_attack(tmp_path)
+    off["finetune"]["seed_checks"] = False
+    result, _ = _run(_config(tmp_path, "TinyGPT2LM", off, name="off.yaml"))
+    assert "finetuned_control" not in result.metrics and "in_phase1_text" not in result.metrics["finetuned"]["total"]
+
+
 def test_phases_one_at_a_time_match_run_attack(tmp_path: Path) -> None:
     pytest.importorskip("peft")
     _run(_config(tmp_path, "TinyGPT2LM", _finetune_attack(tmp_path, attacker=False), name="gen.yaml"))

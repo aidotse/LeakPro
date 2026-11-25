@@ -39,6 +39,13 @@ generation whose generated text (without the prompt) shares any 30-token window 
 corpus is dropped *before* filtering (both sides lowercased and whitespace-collapsed);
 filtering scores with the base model; verification as in Phase 1 -> **S_new**.
 
+**Phase 4 seed checks** (``finetune.seed_checks``, on by default; reported only). Phase 4 draws with
+Phase 1's seeds, so a gain in S_new may come from reselecting Phase 1 output rather than from the
+fine-tuning. Phase 4 therefore reports how many S_new sequences Phase 1 already generated (same text,
+or a verified window inside a Phase 1 generation), and an adapter-off control: Phase 1's pool (what
+Phase 4 would generate with the adapter disabled) through the same overlap removal, selection and
+verification (phase ``finetuned_control``).
+
 **Counts.** Every phase reports sequences (``verified``) and, as an addition, distinct passages
 (``unique``): verified sequences whose matches share corpus words or a ``windowing.size``-word text
 belong to one passage.
@@ -93,7 +100,7 @@ from leakpro.attacks.utils.extraction.finetune import (
 )
 from leakpro.attacks.utils.extraction.generation import StrategyGenerator, load_prefixes
 from leakpro.attacks.utils.extraction.progress import Progress
-from leakpro.attacks.utils.extraction.records import Candidate, Windowing
+from leakpro.attacks.utils.extraction.records import Candidate, Windowing, normalize
 from leakpro.attacks.utils.extraction.scoring import SCORE_NAMES, drop_short_and_duplicates, score_candidates, select_top_union
 from leakpro.attacks.utils.extraction.store import ArtifactStore, stage_key
 from leakpro.attacks.utils.extraction.verification import InMemoryVerifier, Verifier, verify_candidates
@@ -107,6 +114,7 @@ from leakpro.utils.save_load import fingerprint_model, safe_torch_load
 PHASE_INITIAL = "initial"
 PHASE_EXPANSION = "expansion"
 PHASE_FINETUNED = "finetuned"
+PHASE_CONTROL = "finetuned_control"
 
 class GenStrategyConfig(BaseModel):
     """One prompting strategy."""
@@ -247,6 +255,12 @@ class FinetuneConfig(BaseModel):
     overlap_window: int = Field(default=30, ge=1,
                                 description="Phase 4: drop generations whose generated text shares a window this long (tokens)")
     strategies: Optional[List[GenStrategyConfig]] = Field(default=None, description="Phase 4 strategies; None: `initial`")
+    seed_checks: bool = Field(
+        default=True,
+        description="Phase 4: report how many S_new sequences Phase 1 already generated, and an adapter-off "
+                    "control (Phase 1's pool through Phase 4's overlap removal, selection and verification). "
+                    "Reported only; the attack's own counts do not change",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -497,6 +511,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         if overlap is not None:
             extra = {name: {"overlap_removed": len(generated[name]) - len(after_overlap[name])} for name in generated}
         out["metrics"] = self._metrics(generated, scored, out["selected"], extra, text_of=text_of)
+        out.update(generated=generated, scored=scored, score_keys=score_keys)
         return out
 
     def _expansion_phase(self: Self, s0: List[Candidate], s0_key: str) -> Dict[str, Any]:
@@ -577,6 +592,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         self._s1_novel: Optional[List[Candidate]] = None
         self._ft_corpus: Optional[List[str]] = None
         self._adapter_key: Optional[str] = None
+        self._phase1: Optional[Dict[str, Any]] = None
 
     def _release_adapter(self: Self) -> None:
         """Remove the LoRA adapter, if attached, so that the base model is queried again."""
@@ -608,6 +624,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         p1 = self._extraction_phase(PHASE_INITIAL, self.configs.initial, self.model_fingerprint)
         self._s0 = [c for c in p1["selected"] if c.attacker_matches]
         self._s0_key = p1["key"]
+        self._phase1 = {k: p1[k] for k in ("generated", "scored", "score_keys")}  # for the Phase 4 seed checks
         logger.info(f"Phase 1 done: S0 = {len(self._s0)} verified sequences")
         return self._keep(PHASE_INITIAL, p1)
 
@@ -668,12 +685,60 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
             self._release_adapter()
         out["metrics"]["total"]["finetune_corpus"] = len(self._ft_corpus)
         logger.info(f"Phase 4 done: S_new = {out['metrics']['total']['verified']} verified sequences")
+        if ftc.seed_checks and self.attacker_verifier is not None:
+            self._seed_checks(out, overlap, stage_key(self._ft_corpus))
         return self._keep(PHASE_FINETUNED, out)
+
+    def _seed_checks(self: Self, out: Dict[str, Any], overlap: TokenWindowIndex, overlap_key: str) -> None:
+        """Is S_new attributable to fine-tuning? Two checks, reported only.
+
+        Phase 4 draws with Phase 1's seeds (same strategies, same batch seeds), so:
+
+        1. ``in_phase1_text`` / ``in_phase1_window``: S_new sequences whose normalized continuation, or one
+           of whose verified windows, already occurs in Phase 1's full generated pool (any strategy).
+        2. Adapter-off control (``finetuned_control``): with the adapter disabled, Phase 4 would regenerate
+           exactly Phase 1's pool. So the control is Phase 1's pool, already scored by the base model, put
+           through Phase 4's overlap removal, top-``top_percent`` selection and verification. If it verifies
+           about as many sequences as S_new, the gain comes from reselection, not from fine-tuning.
+        """
+        pool = [c for cands in self._phase1["generated"].values() for c in cands]
+        texts = {normalize(c.continuation) for c in pool}
+        joined = "\n".join(texts)  # one string: a window inside a generation is a substring of it
+        rows = out["metrics"]
+        for name in [*rows]:
+            if name == "total":
+                continue
+            s_new = [c for c in out["selected"] if c.attacker_matches and c.strategy == name]
+            for c in s_new:
+                c.meta["in_phase1_text"] = normalize(c.continuation) in texts
+                c.meta["in_phase1_window"] = any(m.window in joined for m in c.attacker_matches)
+            rows[name]["in_phase1_text"] = sum(c.meta["in_phase1_text"] for c in s_new)
+            rows[name]["in_phase1_window"] = sum(c.meta["in_phase1_window"] for c in s_new)
+        for key in ("in_phase1_text", "in_phase1_window"):
+            rows["total"][key] = sum(rows[n][key] for n in rows if n != "total")
+        logger.info(f"Seed check: {rows['total']['in_phase1_window']} of {rows['total']['verified']} S_new sequences "
+                    "share a verified window with a Phase 1 generation")
+
+        strategies = self.configs.finetune.strategies or self.configs.initial
+        if [s.model_dump() for s in strategies] != [s.model_dump() for s in self.configs.initial]:
+            logger.warning("Adapter-off control skipped: Phase 4 strategies differ from Phase 1's")
+            return
+        generated, scored = self._phase1["generated"], self._phase1["scored"]
+        pools = {name: [c for c in _copy(cands) if not overlap.overlaps(c.continuation)] for name, cands in scored.items()}
+        keys = [stage_key(k, "control: drop overlap", overlap_key, overlap.window) for k in self._phase1["score_keys"]]
+        control = self._select_and_verify(pools, keys, PHASE_CONTROL, "continuation")
+        # counted over everything generated, as Phase 4 counts it
+        extra = {name: {"overlap_removed": sum(overlap.overlaps(c.continuation) for c in generated[name])}
+                 for name in scored}
+        metrics = self._metrics(generated, pools, control["selected"], extra, text_of="continuation")
+        self._outputs[PHASE_CONTROL] = {"metrics": metrics, "extracted": []}
+        logger.info(f"Adapter-off control: {metrics['total']['verified']} verified sequences "
+                    f"(S_new: {rows['total']['verified']})")
 
     def finish(self: Self) -> ExtractionResult:
         """Build the result from the phases run so far."""
         self._require(PHASE_INITIAL in self._outputs, "Run run_phase1() first")
-        order = (PHASE_INITIAL, PHASE_EXPANSION, PHASE_FINETUNED)
+        order = (PHASE_INITIAL, PHASE_EXPANSION, PHASE_FINETUNED, PHASE_CONTROL)
         metrics = {phase: self._outputs[phase]["metrics"] for phase in order if phase in self._outputs}
         extracted = [r for phase in order if phase in self._outputs for r in self._outputs[phase]["extracted"]]
         result = ExtractionResult("memorization_extraction", self.attack_id, self.configs.model_dump(), metrics,

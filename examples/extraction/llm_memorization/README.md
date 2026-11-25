@@ -199,7 +199,12 @@ The counts per phase are also printed at the end of every step (and kept in `run
 Results go to `<output_dir>/results/<attack id>/`:
 
 - `result.json`: counts per phase and strategy (generated, kept, selected, verified, unique, rate,
-  and per phase `anchors`, `novel`, `novel_unique`, `overlap_removed` or `finetune_corpus`);
+  and per phase `anchors`, `novel`, `novel_unique`, `overlap_removed` or `finetune_corpus`). With
+  Phases 3-4, two checks of whether S_new comes from the fine-tuning (`finetune.seed_checks`, on by
+  default): `in_phase1_text` / `in_phase1_window` count the S_new sequences that Phase 1 already
+  generated (same text, or a verified window inside a Phase 1 generation), and `finetuned_control`
+  is an adapter-off control: Phase 1's generations, which Phase 4 would reproduce with the adapter
+  disabled (same seeds), put through Phase 4's overlap removal, selection and verification;
 - `extracted.jsonl`: one record per extracted sequence with its text and matched windows.
 
 Intermediate stages are cached in `<output_dir>/artifacts`. Running the same command again resumes an
