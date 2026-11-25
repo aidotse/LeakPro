@@ -52,7 +52,7 @@ def _run(config: str) -> tuple:
 
 # ------------------------------------------------------------------------------------- Phase 2
 
-def _expansion_attack(tmp_path: Path, initial_tokens: int = 300, novelty: str = "window") -> Dict:
+def _expansion_attack(tmp_path: Path, initial_tokens: int = 300) -> Dict:
     corpus = _write_jsonl(tmp_path / "aux.jsonl", [{"doc_id": "aux-1", "text": f"Header. {SECRET} Footer."}])
     return {
         # S0: the continuation of "w0x ", i.e. SECRET from w1x on, up to `initial_tokens` characters in total
@@ -63,30 +63,25 @@ def _expansion_attack(tmp_path: Path, initial_tokens: int = 300, novelty: str = 
         # "w1x ... w8x " is followed by "w8x w9x w10x ...": the repeated w8x moves the window grid by
         # one word, so the expansion's window strings differ from S0's although the text is the same.
         "expansion": {"anchor_tokens": 40, "prefix_lengths": [32], "gens_per_anchor": 4, "batch_size": 2,
-                      "max_tokens": 300, "novelty": novelty},
+                      "max_tokens": 300},
     }
 
 
-@pytest.mark.parametrize(("novelty", "novel"), [("window", True), ("coverage", False)])
-def test_expansion_of_text_s0_already_holds(tmp_path: Path, novelty: str, novel: bool) -> None:
-    result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path, novelty=novelty)))
+def test_expansion_of_s0_text_on_a_shifted_grid_is_novel(tmp_path: Path) -> None:
+    result, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path)))
     assert result.metrics["initial"]["total"]["verified"] == 1
     exp = result.metrics["expansion"]["expansion"]
     assert exp["anchors"] == 1 and exp["generated"] == 4
     assert exp["verified"] == exp["selected"] >= 1
     assert exp["unique"] == 1
-    # Every verified window is S0 text on a grid shifted by one word: new as a window string (the
-    # thesis test, default), not new as content.
-    if novel:
-        assert exp["novel"] == exp["verified"] and exp["novel_unique"] == 1
-    else:
-        assert exp["novel"] == 0 and exp["novel_unique"] == 0
+    # Every verified window is S0 text on a grid shifted by one word, so every window string is new:
+    # novel under the thesis test, which compares window strings.
+    assert exp["novel"] == exp["verified"] and exp["novel_unique"] == 1
 
 
-@pytest.mark.parametrize("novelty", ["window", "coverage"])
-def test_expansion_reaching_past_s0_is_novel(tmp_path: Path, novelty: str) -> None:
+def test_expansion_reaching_past_s0_is_novel(tmp_path: Path) -> None:
     # S0 now ends at w39x (160 characters with the prefix); the expansion continues SECRET to w59x
-    attack = _expansion_attack(tmp_path, initial_tokens=160, novelty=novelty)
+    attack = _expansion_attack(tmp_path, initial_tokens=160)
     result, _ = _run(_config(tmp_path, "ParrotLM", attack))
     assert result.metrics["initial"]["total"]["verified"] == 1
     exp = result.metrics["expansion"]["expansion"]
@@ -212,11 +207,6 @@ def test_seed_checks_report_phase1_overlap_and_an_adapter_off_control(tmp_path: 
     assert ft["total"]["in_phase1_text"] == ft["total"]["in_phase1_window"] == ft["total"]["verified"]
     assert list(result.metrics) == ["initial", "finetuned", "finetuned_control"]
     assert not [r for r in result.extracted if r["phase"] == "finetuned_control"]  # reported, not extracted
-
-    off = _finetune_attack(tmp_path)
-    off["finetune"]["seed_checks"] = False
-    result, _ = _run(_config(tmp_path, "TinyGPT2LM", off, name="off.yaml"))
-    assert "finetuned_control" not in result.metrics and "in_phase1_text" not in result.metrics["finetuned"]["total"]
 
 
 def test_phases_one_at_a_time_match_run_attack(tmp_path: Path) -> None:

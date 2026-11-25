@@ -31,21 +31,18 @@ Phase 1's scoring, prefix strategy and temperature decay follow Carlini et al.,
 [*Extracting Training Data from Large Language Models*](https://www.usenix.org/conference/usenixsecurity21/presentation/carlini-extracting)
 (USENIX Security 2021), and the fine-tuning phase is influenced by Nasr et al.,
 *Scalable Extraction of Training Data from Aligned, Production Language Models* (2025).
-With the defaults, every phase follows the thesis pipeline step by step. The differences:
+Every phase follows the thesis pipeline step by step. The differences:
 
 | | Here | Thesis |
 |---|---|---|
 | Fine-tuning | LoRA on the unquantized model (dtype from the hardware), AdamW in a PyTorch loop | QLoRA (4-bit base model), 8-bit paged AdamW, fp16 |
 | Adapter used in Phase 4 | the one at the end of training | a chosen training checkpoint |
 | Seeds | one per generation batch (resumable); same procedure, different samples | one per script |
-| Counts | sequences, plus unique passages | sequences |
-| Phase 2 prompt join (`expansion.prompt_join`) | `space` (default, as the thesis) or `tokens` | space |
-| Phase 2 novelty (`expansion.novelty`) | `window` (default, as the thesis) or `coverage` | window strings |
+| Reported in addition | unique passages next to the sequence counts; Phase 4 seed checks (see Output) | – |
 
-`prompt_join: tokens` decodes prompt and continuation together, so a prefix cut inside a word is not
-split in two. `novelty: coverage` counts a sequence as novel only if it covers text or corpus words S0
-does not; window strings depend on where the window grid falls, so `window` also counts S0 text
-shifted by a word. Compared with Carlini et al., sampling uses `top_k=50` and `top_p=0.95` (they use
+Phase 2 novelty compares window strings with S0's exhaustive window set, as the thesis does. Window
+strings depend on where the window grid falls, so S0 text shifted by a word (for example after a
+prefix cut inside a word, which the space join splits) also counts as novel. Compared with Carlini et al., sampling uses `top_k=50` and `top_p=0.95` (they use
 top-n 40 without a nucleus filter) and prefixes are continued greedily (they sample).
 
 The **attacker verifier** (`attacker_verifier`) is a public corpus the attacker believes resembles the
@@ -200,8 +197,8 @@ Results go to `<output_dir>/results/<attack id>/`:
 
 - `result.json`: counts per phase and strategy (generated, kept, selected, verified, unique, rate,
   and per phase `anchors`, `novel`, `novel_unique`, `overlap_removed` or `finetune_corpus`). With
-  Phases 3-4, two checks of whether S_new comes from the fine-tuning (`finetune.seed_checks`, on by
-  default): `in_phase1_text` / `in_phase1_window` count the S_new sequences that Phase 1 already
+  Phases 3-4, two checks of whether S_new comes from the fine-tuning (reported only):
+  `in_phase1_text` / `in_phase1_window` count the S_new sequences that Phase 1 already
   generated (same text, or a verified window inside a Phase 1 generation), and `finetuned_control`
   is an adapter-off control: Phase 1's generations, which Phase 4 would reproduce with the adapter
   disabled (same seeds), put through Phase 4's overlap removal, selection and verification;

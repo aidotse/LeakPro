@@ -3,7 +3,7 @@
 import torch
 
 from leakpro.attacks.extraction_attacks.memorization_extraction import ExpansionConfig
-from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, join_prompt
+from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors
 from leakpro.attacks.utils.extraction.records import Candidate, Match
 from leakpro.tests.extraction_attacks.fixtures import BOS, SECRET, CharTokenizer, ParrotLM
 
@@ -44,7 +44,7 @@ def test_anchor_generator_batches_prefixes_and_lengths() -> None:
     assert len(cand.gen_ids) == 60 - (n + 1)  # min_new_tokens fills the budget exactly
     assert SECRET.startswith(cand.prompt_text)
     assert SECRET.startswith(cand.prompt_text + cand.continuation)
-    assert cand.full_text == f"{cand.prompt_text} {cand.continuation}".strip() == join_prompt(tok, cand)
+    assert cand.full_text == f"{cand.prompt_text} {cand.continuation}".strip()
     assert cand.meta["anchor"] == 0 and cand.strategy == "expansion"
 
 
@@ -55,17 +55,13 @@ def test_prefix_longer_than_the_budget_gives_an_empty_batch() -> None:
     assert AnchorGenerator([anchor], cfg, tok).generate_batch(0, ParrotLM(), 0, torch.device("cpu"), "torch") == []
 
 
-def test_prompt_join_tokens_keeps_a_word_cut_by_the_prefix_whole() -> None:
-    # 30 characters of the anchor end inside a word ("... w7x w8"); ParrotLM continues with "x w8x ...".
-    # The default space join (as in the thesis) gives the words "w8" and "x"; `tokens` keeps "w8x".
+def test_full_text_joins_prefix_and_continuation_with_a_space() -> None:
+    # As in the thesis: 30 characters of the anchor end inside a word ("... w7x w8"), ParrotLM continues
+    # with "x w8x ...", and the space join gives the words "w8" and "x".
     tok = CharTokenizer()
     anchor = {"tokens": tok.encode(SECRET[4:], add_special_tokens=False)[:40], "parent_id": "p", "parent_strategy": "b"}
     cfg = ExpansionConfig(prefix_lengths=[30], gens_per_anchor=1, batch_size=1, max_tokens=80, top_k=None)
     (cand,) = AnchorGenerator([anchor], cfg, tok).generate_batch(0, ParrotLM(), 0, torch.device("cpu"), "torch")
     assert cand.prompt_text.endswith(" w8") and cand.continuation.startswith("x ")
+    assert cand.full_text == f"{cand.prompt_text} {cand.continuation}"
     assert cand.full_text.split()[6:9] == ["w7x", "w8", "x"]
-    cfg = cfg.model_copy(update={"prompt_join": "tokens"})
-    (cand,) = AnchorGenerator([anchor], cfg, tok).generate_batch(0, ParrotLM(), 0, torch.device("cpu"), "torch")
-    words = cand.full_text.split()
-    assert all(w.startswith("w") and w.endswith("x") for w in words), words
-    assert words[:8] == [f"w{i}x" for i in range(1, 9)]

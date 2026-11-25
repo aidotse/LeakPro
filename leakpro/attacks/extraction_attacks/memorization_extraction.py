@@ -22,14 +22,10 @@ Phases 3 and 4 are an optional, stronger attack that needs the weights.
 1. Cut anchors of up to 50 tokens from S0, starting at each sequence's first verified window.
 2. Prompt with a random 30-50 token prefix of each anchor and sample 150 continuations per anchor
    (temperature decaying from 3 to 1).
-3. Filter and verify prefix + continuation (all windows) -> **S1**. ``prompt_join: space`` (default)
-   joins the decoded prefix and continuation with a space; ``tokens`` decodes them together, so a
-   prefix cut inside a word does not split it.
-4. Keep the S1 sequences with a verified window S0 does not have -> **S1-novel**; S0 is verified on
-   every window for this. ``novelty: window`` (default) compares window strings; ``coverage`` asks
-   whether the window's text lies inside S0's verified text (at any word shift) or its corpus words
-   inside S0's matches. Window strings depend on where the window grid falls: the same text shifted
-   by a word gives different windows and counts as novel.
+3. Filter and verify the decoded prefix and continuation, joined by a space (all windows) -> **S1**.
+4. Keep the S1 sequences with a verified window string that the exhaustive verification of S0 did
+   not find -> **S1-novel**. Window strings depend on where the window grid falls, so S0 text shifted
+   by a word (e.g. after a prefix cut inside a word) also counts as novel, as in the thesis.
 
 **Phase 3, fine-tuning** (``finetune`` set): LoRA continual pre-training on S0 ∪ S1-novel (texts of at
 least 20 words, normalized-deduplicated, shuffled).
@@ -39,7 +35,7 @@ generation whose generated text (without the prompt) shares any 30-token window 
 corpus is dropped *before* filtering (both sides lowercased and whitespace-collapsed);
 filtering scores with the base model; verification as in Phase 1 -> **S_new**.
 
-**Phase 4 seed checks** (``finetune.seed_checks``, on by default; reported only). Phase 4 draws with
+**Phase 4 seed checks** (reported only; they change none of the counts above). Phase 4 draws with
 Phase 1's seeds, so a gain in S_new may come from reselecting Phase 1 output rather than from the
 fine-tuning. Phase 4 therefore reports how many S_new sequences Phase 1 already generated (same text,
 or a verified window inside a Phase 1 generation), and an adapter-off control: Phase 1's pool (what
@@ -60,15 +56,15 @@ and temperature decay follow Carlini et al., *Extracting Training Data from Larg
 (USENIX Security 2021); the fine-tuning phase is influenced by Nasr et al., *Scalable Extraction of
 Training Data from Aligned, Production Language Models* (2025).
 
-With the defaults, every phase follows the thesis pipeline step by step. The differences:
+Every phase follows the thesis pipeline step by step. The differences:
 
 - *Fine-tuning*: plain LoRA on the unquantized model (dtype from the hardware), trained with AdamW in
   a PyTorch loop; Phase 4 uses the adapter at the end of training. The thesis used QLoRA (4-bit base
   model, 8-bit paged AdamW, fp16) and a chosen training checkpoint.
 - *Seeds*: every generation batch has its own seed, so runs resume with the same samples; the thesis
   seeded each script once. The samples therefore differ, not the procedure.
-- *Additions*: unique-passage counts next to the sequence counts, and the opt-in ``prompt_join:
-  tokens`` and ``novelty: coverage`` described above.
+- *Reported in addition*: unique-passage counts next to the sequence counts, and the Phase 4 seed
+  checks. Neither changes a step of the pipeline or any of its counts.
 
 Compared with Carlini et al.: sampling uses ``top_k=50`` and ``top_p=0.95`` (they use top-n 40 without
 a nucleus filter), and prefixes are continued greedily (they sample).
@@ -84,9 +80,9 @@ import torch
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtractionAttack
-from leakpro.attacks.utils.extraction.coverage import KnownContent, KnownWindows, novel_candidates, unique_passages
+from leakpro.attacks.utils.extraction.coverage import KnownWindows, novel_candidates, unique_passages
 from leakpro.attacks.utils.extraction.elasticsearch_verifier import ElasticsearchVerifier, connect
-from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors, join_prompt
+from leakpro.attacks.utils.extraction.expansion import AnchorGenerator, build_anchors
 from leakpro.attacks.utils.extraction.finetune import (
     TokenWindowIndex,
     adapter_disabled,
@@ -217,18 +213,6 @@ class ExpansionConfig(BaseModel):
     t_start: float = Field(default=3.0, gt=0)
     t_end: float = Field(default=1.0, gt=0)
     decay_steps: int = Field(default=20, ge=1)
-    prompt_join: Literal["space", "tokens"] = Field(
-        default="space",
-        description="How full_text (what Phase 2 scores and verifies) is built: `space` joins the decoded prefix "
-                    "and continuation with a space, as in the thesis; `tokens` decodes prompt and generated tokens "
-                    "together, so a prefix cut inside a word does not split it",
-    )
-    novelty: Literal["window", "coverage"] = Field(
-        default="window",
-        description="S1-novel test: `window` (as in the thesis) keeps sequences with a verified window string that "
-                    "S0's exhaustive verification did not find; `coverage` keeps sequences that cover text or corpus "
-                    "words S0 does not (independent of where the window grid falls)",
-    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -255,12 +239,6 @@ class FinetuneConfig(BaseModel):
     overlap_window: int = Field(default=30, ge=1,
                                 description="Phase 4: drop generations whose generated text shares a window this long (tokens)")
     strategies: Optional[List[GenStrategyConfig]] = Field(default=None, description="Phase 4 strategies; None: `initial`")
-    seed_checks: bool = Field(
-        default=True,
-        description="Phase 4: report how many S_new sequences Phase 1 already generated, and an adapter-off "
-                    "control (Phase 1's pool through Phase 4's overlap removal, selection and verification). "
-                    "Reported only; the attack's own counts do not change",
-    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -522,16 +500,9 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
             anchors = anchors[:ecfg.max_anchors]
         logger.info(f"Expansion: {len(anchors)} anchors from {len(s0)} S0 sequences")
         generator = AnchorGenerator(anchors, ecfg, self.tokenizer, phase=phase)
-        # Settings that act after generation (how full_text is joined, the novelty test) stay out of its key.
-        gen_settings = ecfg.model_dump(exclude={"prompt_join", "novelty"})
-        key = stage_key("generate", phase, gen_settings, s0_key, self.seed, self.model_fingerprint,
+        key = stage_key("generate", phase, ecfg.model_dump(), s0_key, self.seed, self.model_fingerprint,
                         self.tokenizer_id, self.configs.generation_backend, [a["tokens"] for a in anchors])
         gen = self._run_generator(generator, key, f"{phase}-generate")
-        # full_text is rebuilt with the configured join, so cached generations serve either setting.
-        for cand in gen["candidates"]:
-            cand.full_text = join_prompt(self.tokenizer, cand, ecfg.prompt_join)
-        if ecfg.prompt_join != "space":  # `space` is how generations were always stored: keep the old keys
-            gen = {"key": stage_key(gen["key"], f"full_text: {ecfg.prompt_join}"), "candidates": gen["candidates"]}
         sco = self._score(gen, generator.name, phase, "full_text")
         # S1 is verified on every window: the novelty test needs all of them.
         out = self._select_and_verify({generator.name: sco["candidates"]}, [sco["key"]], phase, "full_text",
@@ -540,9 +511,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         # Exhaustive verification of S0, on copies so Phase 1's records keep their first-match results.
         s0_all = self._verify(_copy(s0), s0_key, self.attacker_verifier, "all", "attacker_matches",
                               f"{PHASE_INITIAL}-verify-all", "continuation")["candidates"]
-        known = (KnownContent(s0_all, "continuation", self.windowing.size) if ecfg.novelty == "coverage"
-                 else KnownWindows(s0_all))
-        s1_novel = novel_candidates(s1, known)
+        s1_novel = novel_candidates(s1, KnownWindows(s0_all))
         extra = {"anchors": len(anchors), "novel": len(s1_novel),
                  "novel_unique": unique_passages(s1_novel, "full_text", self.windowing.size)}
         out["metrics"] = self._metrics({generator.name: gen["candidates"]}, {generator.name: sco["candidates"]},
@@ -685,7 +654,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
             self._release_adapter()
         out["metrics"]["total"]["finetune_corpus"] = len(self._ft_corpus)
         logger.info(f"Phase 4 done: S_new = {out['metrics']['total']['verified']} verified sequences")
-        if ftc.seed_checks and self.attacker_verifier is not None:
+        if self.attacker_verifier is not None:
             self._seed_checks(out, overlap, stage_key(self._ft_corpus))
         return self._keep(PHASE_FINETUNED, out)
 

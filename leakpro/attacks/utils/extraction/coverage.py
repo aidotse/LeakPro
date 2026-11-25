@@ -2,27 +2,16 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""What verified candidates cover: Phase 2 novelty and unique-passage counts.
+"""Phase 2 novelty (as in the thesis pipeline) and unique-passage counts.
 
-Phase 2 novelty has two tests (``ExpansionConfig.novelty``): :class:`KnownWindows`, the thesis
-pipeline's comparison of window strings, and :class:`KnownContent`, which compares covered content.
-
-Window *strings* are a poor identity for memorized content. Windows start every ``stride`` words of
-the verified text, so the same passage shifted by a number of words that is not a multiple of the
-stride yields entirely different window strings. Both helpers here therefore work on what the
-verified windows cover, in two complementary ways:
-
-* **corpus words**: every match covers the words ``corpus_offset .. corpus_offset + width`` of
-  document ``doc_id``;
-* **text**: the verified windows of a candidate are merged into spans of its normalized text, and
-  every ``n``-word sequence inside those spans (stride 1, so independent of the window grid) is
-  part of what the candidate covers.
-
-The text view catches what the corpus view misses when a corpus holds the same text in more than
-one document (common in web corpora): a shifted window can then resolve to another copy.
+* :class:`KnownWindows` and :func:`novel_candidates`: a Phase 2 sequence is novel when one of its
+  verified window strings was not verified for S0 (exhaustive verification of S0).
+* :func:`unique_passages`: verified sequences whose matches cover a common corpus word
+  (``doc_id`` + word offset) or share an ``n``-word text count as one passage. It is reported next
+  to the sequence counts and changes none of them.
 """
 
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from leakpro.attacks.utils.extraction.records import Candidate, Match, normalize
 from leakpro.utils.import_helper import Self
@@ -78,36 +67,8 @@ class KnownWindows:
         return match.window in self.windows
 
 
-class KnownContent:
-    """Content covered by a set of verified candidates (Phase 1's S0, verified on every window).
-
-    Args:
-    ----
-        candidates: The verified candidates.
-        text_of: Candidate field that was verified.
-        n: Window size in words (``Windowing.size``).
-
-    """
-
-    def __init__(self: Self, candidates: Sequence[Candidate], text_of: str, n: int) -> None:
-        self.n = n
-        self.spans = [span for c in candidates for span in covered_texts(c, text_of)]
-        self.grams = {g for c in candidates for g in text_grams(c, text_of, n)}
-        self.words = {w for c in candidates for w in corpus_words(c.attacker_matches)}
-
-    def is_known(self: Self, match: Match) -> bool:
-        """True when ``match`` adds nothing: its text lies inside a known span, or its corpus words are all known."""
-        if match.window in self.grams:
-            return True
-        if len(match.window.split()) < self.n:  # short-text window: no gram of that width is indexed
-            needle = f" {match.window} "
-            if any(needle in f" {span} " for span in self.spans):
-                return True
-        return corpus_words([match]) <= self.words
-
-
 def novel_candidates(
-    s1: Sequence[Candidate], known: Union[KnownWindows, KnownContent], novel_key: Optional[str] = "novel",
+    s1: Sequence[Candidate], known: KnownWindows, novel_key: Optional[str] = "novel",
 ) -> List[Candidate]:
     """S1 candidates with at least one verified window that ``known`` does not cover; marks ``meta[novel_key]``."""
     out = []

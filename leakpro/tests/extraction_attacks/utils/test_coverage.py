@@ -1,11 +1,10 @@
-"""Phase 2 novelty and unique-passage counts decided on covered content, not on window strings."""
+"""Phase 2 novelty (window strings, as in the thesis) and unique-passage counts."""
 
 from typing import List
 
 import pytest
 
 from leakpro.attacks.utils.extraction.coverage import (
-    KnownContent,
     KnownWindows,
     merged_spans,
     novel_candidates,
@@ -34,37 +33,22 @@ def verifier() -> InMemoryVerifier:
     return InMemoryVerifier([("doc", DOC)])
 
 
-@pytest.mark.parametrize(("start", "window_novel"), [(5, False), (1, True), (3, True)])
-def test_a_shifted_substring_of_s0(verifier: InMemoryVerifier, start: int, window_novel: bool) -> None:
-    # S0 = words 0..99, verified on every window; S1 = S0[start:90]. Window strings (the thesis test)
-    # flag start=1 and start=3 as novel, because their windows fall on a different grid; covered
-    # content does not.
-    s0 = [_cand("s0", _words(0, 100), verifier)]
+@pytest.mark.parametrize(("start", "novel"), [(5, False), (1, True), (3, True)])
+def test_window_strings_decide_novelty(verifier: InMemoryVerifier, start: int, novel: bool) -> None:
+    # S0 = words 0..99, verified on every window; S1 = S0[start:90]. As in the thesis, novelty compares
+    # window strings, so start=1 and start=3 are novel: their windows fall on a different grid.
     s1 = _cand("s1", _words(start, 90), verifier)
     assert len(s1.attacker_matches) == 12
-    assert bool(novel_candidates([s1], KnownWindows(s0))) is window_novel
-    assert novel_candidates([s1], KnownContent(s0, "full_text", WINDOWING.size)) == []
-    assert s1.meta["novel"] is False
+    assert bool(novel_candidates([s1], KnownWindows([_cand("s0", _words(0, 100), verifier)]))) is novel
+    assert s1.meta["novel"] is novel
 
 
 def test_text_beyond_s0_is_novel(verifier: InMemoryVerifier) -> None:
-    known = KnownContent([_cand("s0", _words(0, 100), verifier)], "full_text", WINDOWING.size)
-    s1 = [_cand("inside", _words(3, 90), verifier), _cand("beyond", _words(73, 130), verifier),
+    known = KnownWindows([_cand("s0", _words(0, 100), verifier)])
+    s1 = [_cand("inside", _words(5, 90), verifier), _cand("beyond", _words(75, 130), verifier),
           _cand("unverified", "nothing from the corpus " * 10, verifier)]
     assert [c.id for c in novel_candidates(s1, known)] == ["beyond"]
     assert [c.meta["novel"] for c in s1] == [False, True, False]
-
-
-def test_known_text_counts_even_when_the_corpus_resolves_it_to_another_copy() -> None:
-    # The corpus holds the passage twice; a shifted window resolved to the second copy covers new
-    # corpus words but no new text, so it is not novel.
-    s0 = Candidate(id="s0", phase="initial", strategy="b", prompt_ids=[], gen_ids=[], prompt_text="",
-                   continuation=_words(0, 40), full_text=_words(0, 40),
-                   attacker_matches=[Match("copy-1", 0, 0, 30, _words(0, 30)), Match("copy-1", 5, 5, 35, _words(5, 35))])
-    known = KnownContent([s0], "continuation", 30)
-    assert known.is_known(Match("copy-2", 2, 0, 30, _words(2, 32)))  # inside S0's verified span 0..35
-    assert not known.is_known(Match("copy-2", 10, 0, 30, _words(10, 40)))  # words 35..39 were never verified
-    assert known.is_known(Match("copy-1", 3, 0, 30, "a different string over known corpus words"))
 
 
 def test_merged_spans_join_overlapping_windows_only() -> None:
