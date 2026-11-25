@@ -6,8 +6,9 @@
 
 A candidate is verified when at least one of its windows (see
 :class:`~leakpro.attacks.utils.extraction.records.Windowing`) occurs verbatim, after
-:func:`~leakpro.attacks.utils.extraction.records.normalize`, in a corpus document. Matching is
-word-aligned: a window never matches across the middle of a word.
+:func:`~leakpro.attacks.utils.extraction.records.normalize`, in a corpus document. The test is a
+plain substring test on the normalized texts (``window in document``), so a window may start or end
+inside a corpus word.
 
 The same verifier class serves two roles that must stay separate:
 
@@ -88,7 +89,7 @@ class InMemoryVerifier(Verifier):
         digest = hashlib.sha256()
         for doc_id, text in documents:
             norm = normalize(text)
-            self._docs.append((str(doc_id), f" {norm} "))
+            self._docs.append((str(doc_id), norm))
             digest.update(f"{doc_id}\x00{norm}\x01".encode("utf-8"))
         self._corpus_id = f"in_memory:{digest.hexdigest()}"
         self._cache: Dict[str, Optional[Tuple[str, int]]] = {}
@@ -116,12 +117,11 @@ class InMemoryVerifier(Verifier):
         return len(self._docs)
 
     def lookup(self: Self, window: str) -> Optional[Tuple[str, int]]:
-        """First document containing ``window`` as whole words, with the word offset of the match."""
+        """First document containing ``window`` (substring test), with the word offset of the match."""
         if window not in self._cache:
-            needle = f" {window} "
             hit = None
-            for doc_id, padded in self._docs:
-                offset = word_offset(padded, needle)
+            for doc_id, text in self._docs:
+                offset = word_offset(text, window)
                 if offset is not None:
                     hit = (doc_id, offset)
                     break
@@ -129,10 +129,10 @@ class InMemoryVerifier(Verifier):
         return self._cache[window]
 
 
-def word_offset(padded: str, needle: str) -> Optional[int]:
-    """Word offset of `` needle `` inside `` padded `` (both space-padded, normalized), or None."""
-    pos = padded.find(needle)
-    return None if pos == -1 else padded[:pos + 1].count(" ") - 1
+def word_offset(text: str, window: str) -> Optional[int]:
+    """Index of the word of ``text`` in which ``window`` first occurs (both normalized), or None."""
+    pos = text.find(window)
+    return None if pos == -1 else text[:pos].count(" ")
 
 
 def verify_candidates(

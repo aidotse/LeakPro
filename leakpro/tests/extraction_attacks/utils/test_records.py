@@ -24,16 +24,16 @@ def test_normalize_lowercases_and_collapses_whitespace() -> None:
 
 
 @pytest.mark.parametrize("n_words", [0, 5, 9, 10, 12, 29, 30, 31, 34, 35, 47, 100])
-def test_min_span_10_matches_reference_windowing(n_words: int) -> None:
+def test_default_windowing_matches_reference_windowing(n_words: int) -> None:
     text = " ".join(f"Word{i}" for i in range(n_words))
-    ours = [w for _, _, w in Windowing(size=30, stride=5, min_span=10).windows(text)]
+    ours = [w for _, _, w in Windowing().windows(text)]
     assert ours == _reference_windows(text)
 
 
 @pytest.mark.parametrize("n_words", [0, 10, 29])
-def test_default_windowing_never_checks_fewer_than_30_words(n_words: int) -> None:
+def test_min_span_30_never_checks_fewer_than_30_words(n_words: int) -> None:
     text = " ".join(f"w{i}" for i in range(n_words))
-    assert Windowing().windows(text) == []
+    assert Windowing(min_span=30).windows(text) == []
 
 
 def test_window_offsets_are_word_positions() -> None:

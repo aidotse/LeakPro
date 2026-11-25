@@ -58,10 +58,11 @@ def test_lookup_reports_document_word_offset() -> None:
     assert verifier.lookup("not there") is None
 
 
-def test_hits_are_rechecked_word_aligned() -> None:
+def test_hits_are_rechecked_as_substrings() -> None:
     verifier = ElasticsearchVerifier(FakeES([("d1", "xalpha beta gamma")]), "idx")
-    assert verifier.lookup("alpha beta") is None
+    assert verifier.lookup("alpha beta") == ("d1", 0)  # inside the word "xalpha", as `window in chunk`
     assert verifier.lookup("beta gamma") == ("d1", 1)
+    assert verifier.lookup("beta delta") is None
 
 
 def test_matches_in_memory_verifier_in_both_modes() -> None:

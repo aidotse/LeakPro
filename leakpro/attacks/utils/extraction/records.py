@@ -39,15 +39,15 @@ class Windowing:
         size: Window length in words.
         stride: Step between window starts, in words.
         min_span: Shortest window ever queried. A text shorter than ``size`` words is checked with
-            one window of ``max(min_span, n_words)`` words, so with ``min_span == size`` (the
-            default) such a text produces no window at all. ``min_span=10`` also checks texts of 10
-            to ``size - 1`` words, with one window covering the whole text.
+            one window of ``max(min_span, n_words)`` words: with the default 10, texts of 10 to
+            ``size - 1`` words get one window over the whole text and shorter texts none. Set it to
+            ``size`` to skip texts shorter than ``size`` words.
 
     """
 
     size: int = 30
     stride: int = 5
-    min_span: int = 30
+    min_span: int = 10
 
     def __post_init__(self: Self) -> None:
         """Reject window settings that cannot produce a meaningful window."""

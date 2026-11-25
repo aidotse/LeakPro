@@ -6,9 +6,9 @@
 
 For corpora too large to hold in memory, such as a 20 GB RedPajama sample.
 The corpus is indexed once as overlapping word chunks (:func:`index_corpus`); each window is then
-looked up with a ``match_phrase`` query (``slop=0``) and every hit is re-checked with a literal,
-word-aligned substring test on the normalized chunk, so Elasticsearch's analyzer can never make a
-match looser than :class:`~leakpro.attacks.utils.extraction.verification.InMemoryVerifier`'s.
+looked up with a ``match_phrase`` query (``slop=0``) and every hit is re-checked with a literal
+substring test on the normalized chunk, so Elasticsearch's analyzer can never make a match looser
+than :class:`~leakpro.attacks.utils.extraction.verification.InMemoryVerifier`'s.
 
 Chunks are ``chunk_words`` long and start every ``stride`` words. Any window of at most
 ``chunk_words - stride + 1`` words therefore lies inside one chunk; the defaults (100 / 50) cover
@@ -170,10 +170,9 @@ class ElasticsearchVerifier(Verifier):
 
     @staticmethod
     def _check(window: str, hits: Sequence[Dict[str, Any]]) -> Optional[Tuple[str, int]]:
-        needle = f" {window} "
         for hit in hits:
             source = hit["_source"]
-            offset = word_offset(f" {normalize(source['text'])} ", needle)
+            offset = word_offset(normalize(source["text"]), window)
             if offset is not None:
                 # Older indexes name the chunk offset `token_start` (also a word offset).
                 start = source.get("word_start", source.get("token_start", 0))
@@ -181,7 +180,7 @@ class ElasticsearchVerifier(Verifier):
         return None
 
     def lookup(self: Self, window: str) -> Optional[Tuple[str, int]]:
-        """First indexed chunk containing ``window`` as whole words, with the document word offset."""
+        """First indexed chunk containing ``window`` (substring test), with the document word offset."""
         if window not in self._cache:
             res = self.client.search(index=self.index, query=self._query(window), size=self.hits_per_query)
             self._cache[window] = self._check(window, res["hits"]["hits"])

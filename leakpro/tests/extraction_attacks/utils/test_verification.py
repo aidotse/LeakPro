@@ -24,9 +24,11 @@ def test_matching_is_case_and_whitespace_insensitive() -> None:
     assert _verifier().verify(text, Windowing())
 
 
-def test_windows_never_match_inside_a_word() -> None:
-    v = InMemoryVerifier([("d", "xt1 " + " ".join(WORDS[2:40]))])
-    assert v.lookup(" ".join(WORDS[1:31])) is None  # "t1" must not match the tail of "xt1"
+def test_windows_match_as_substrings_even_inside_a_word() -> None:
+    # As the reference pipeline: `window in document` on the normalized texts, so "t1 t2 ..." also
+    # matches inside "xt1 t2 ..."; the offset is the word in which the match starts.
+    v = InMemoryVerifier([("d", "intro xt1 " + " ".join(WORDS[2:40]))])
+    assert v.lookup(" ".join(WORDS[1:31])) == ("d", 1)
 
 
 def test_first_mode_stops_and_all_mode_returns_every_verified_window() -> None:

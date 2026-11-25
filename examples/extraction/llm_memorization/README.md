@@ -6,7 +6,7 @@ inference (`examples/mia/llm_mia`), which asks "was *this* text in the training 
 to *produce* the text itself. LeakPro runs it as `attack_type: extraction`.
 
 A generated sequence counts as extracted when one of its 30-word windows occurs verbatim (after
-lowercasing and collapsing whitespace) in a reference corpus.
+lowercasing and collapsing whitespace) in a reference corpus, as a substring of a document.
 
 ## The attack
 
@@ -98,8 +98,8 @@ attack.run_phase3()   # LoRA;         run_phase4() -> S_new    (optional: need `
 result = attack.finish()              # the phases run so far
 ```
 
-`windowing: {min_span: 10}` also checks generations shorter than 30 words, with one window over
-the whole text (at least 10 words); the default skips them.
+Generations of 10 to 29 words are checked with one window over the whole text (`windowing:
+{min_span: 30}` skips them instead).
 
 ## Step by step in a terminal
 

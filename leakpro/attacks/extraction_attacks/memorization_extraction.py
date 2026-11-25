@@ -14,7 +14,8 @@ Phases 3 and 4 are an optional, stronger attack that needs the weights.
 2. *Filter*: drop texts under ``min_words`` words and exact duplicates, score the rest with the zlib
    and lowercase membership scores, and keep the top ``top_percent`` under each score (per strategy).
 3. *Verify* the continuations of the selected candidates with the attacker verifier (30-word windows,
-   stride 5, first match). The confirmed candidates form **S0**.
+   stride 5, first match; a text of 10-29 words gets one window over the whole text; a window matches
+   when it is a substring of a normalized corpus document). The confirmed candidates form **S0**.
 
 **Phase 2, expansion** (runs by default with an ``attacker_verifier``; ``expansion: null`` skips it):
 
@@ -140,8 +141,9 @@ class WindowingConfig(BaseModel):
 
     size: int = Field(default=30, ge=1, description="Window length in words")
     stride: int = Field(default=5, ge=1, description="Step between windows in words")
-    min_span: int = Field(default=30, ge=1,
-                          description="Shortest window; set below `size` to also check texts shorter than `size` words")
+    min_span: int = Field(default=10, ge=1,
+                          description="Shortest window: a text of min_span to size-1 words gets one window over the "
+                                      "whole text; set to `size` to skip texts shorter than `size` words")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -413,7 +415,8 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         text_of: str,
     ) -> Dict[str, Any]:
         """Verify ``candidates`` and store the matches on ``field`` (cached); returns the stage key and candidates."""
-        key = stage_key("verify", upstream_key, field, verifier.corpus_id, mode, text_of, self.windowing.__dict__)
+        key = stage_key("verify", upstream_key, field, verifier.corpus_id, mode, text_of, self.windowing.__dict__,
+                        "match: substring")
         stage = self.store.stage(stage_name, key)
         if stage.is_done():
             logger.info(f"Reusing cached verification ({stage_name})")
