@@ -28,8 +28,7 @@ Run every command from the repository root. `--quick` is an offline CPU smoke ru
 | [tabular](./tabular/README.md) | `leakage_factors.label_knowledge` | Unknown labels? | Raw one-hot attack | `python -m examples.gia.tabular.leakage_factors.label_knowledge --quick` | `python -m examples.gia.tabular.leakage_factors.label_knowledge` | Adult, California Housing (full) |
 | [tabular](./tabular/README.md) | `leakage_factors.training_exposure` | Leakage during training? | Raw one-hot attack | `python -m examples.gia.tabular.leakage_factors.training_exposure --quick` | `python -m examples.gia.tabular.leakage_factors.training_exposure` | Adult, California Housing (full) |
 | [coco_yolo_1_image](./coco_yolo_1_image/README.md) | `yolo_attack` | Can a YOLO-style detector be inverted? | Detection GIA (YOLO) | `python -m examples.gia.coco_yolo_1_image.yolo_attack --quick` | `python -m examples.gia.coco_yolo_1_image.yolo_attack --device cuda` | none (synthetic) |
-
-The other folders here (`inverting_cifar10_1_image`, `inverting_cifar100_16_images`, `inverting_celebA_1_image`, `huang_cifar10_16_images`, `huang_optuna`, `GIA_base`, `GIA_base_running`, `GIA_base_convnext_imagenet`, `coco_yolo_1_image` (its `main.py`), `pii_inverting_masked_text`, `evaluating_gia_train` and `bn_research`) predate the modular framework: they use the legacy attack classes in `leakpro/attacks/gia_attacks/*.py`, and each has its own README.
+| [legacy](./legacy/README.md) | pre-modular examples | - | Legacy classes | - | see its README | varies |
 
 The `common/` folder holds the shared command-line, data, model, runner and plotting helpers used by the examples.
 

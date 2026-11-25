@@ -8,7 +8,7 @@ Machine learning models for person re-identification and face recognition enable
 |--------|-----------|---------|
 | Membership Inference (MIA) | ✅ | [examples/mia/celebA_HQ/](../mia/celebA_HQ/) |
 | Model Inversion (MInvA) | ❌ | — |
-| Gradient Inversion (GIA) | ✅ | [examples/gia/inverting_celebA_1_image/](../gia/inverting_celebA_1_image/) |
+| Gradient Inversion (GIA) | ✅ | [examples/gia/legacy/inverting_celebA_1_image/](../gia/legacy/inverting_celebA_1_image/) |
 | Synthetic Data Attacks (SynA) | ❌ | — |
 
 ## Notes
