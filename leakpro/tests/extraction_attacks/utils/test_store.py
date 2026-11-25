@@ -40,3 +40,27 @@ def test_batches_resume_in_order(tmp_path: Path) -> None:
 def test_different_keys_use_different_directories(tmp_path: Path) -> None:
     store = ArtifactStore(str(tmp_path))
     assert store.stage("gen", stage_key(1)).path != store.stage("gen", stage_key(2)).path
+
+
+def test_only_the_latest_copy_of_a_stage_is_kept(tmp_path: Path) -> None:
+    store = ArtifactStore(str(tmp_path))
+    old = store.stage("initial-verify", stage_key("old settings"))
+    old.write([_cand(0)])
+    other = store.stage("initial-verify-all", stage_key("x"))  # a different stage whose name extends this one
+    other.write([_cand(1)])
+
+    new = store.stage("initial-verify", stage_key("new settings"))
+    new.write_batch(0, [_cand(2)])
+    assert old.is_done()  # still there while the new copy is unfinished (an interrupted run resumes)
+    new.write([_cand(2)])
+    assert not old.path.exists() and new.is_done()
+    assert other.is_done()  # never matched by "initial-verify-<hex>"
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([new.path.name, other.path.name])
+
+
+def test_an_unfinished_older_copy_is_removed_too(tmp_path: Path) -> None:
+    store = ArtifactStore(str(tmp_path))
+    stale = store.stage("gen", stage_key("interrupted"))
+    stale.write_batch(0, [_cand(0)])
+    store.stage("gen", stage_key("current")).write([_cand(1)])
+    assert not stale.path.exists()

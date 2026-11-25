@@ -99,3 +99,19 @@ def test_run_audit_with_pdf(tmp_path: Path) -> None:
 def test_extraction_section_compiles(tmp_path: Path) -> None:
     ReportHandler(results=[_result()], report_dir=str(tmp_path)).create_report()
     assert (tmp_path / "LeakPro_output.pdf").is_file()
+
+
+def test_saving_keeps_only_the_latest_result_of_the_attack(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    first, second = _result("first_id"), _result("second_id")
+    first.save(output_dir=str(out))
+    unrelated = out / "results" / "mia_result"
+    unrelated.mkdir()
+    (unrelated / "result.json").write_text('{"name": "lira"}')
+    (out / "results" / "LeakPro_output.tex").write_text("report")
+    second.save(output_dir=str(out))
+    assert not (out / "results" / "first_id").exists() and not (out / "data_objects" / "first_id.json").exists()
+    assert (out / "results" / "second_id" / "result.json").exists() and (out / "data_objects" / "second_id.json").exists()
+    assert unrelated.exists() and (out / "results" / "LeakPro_output.tex").exists()
+    second.save(output_dir=str(out))  # saving the same result again keeps it
+    assert (out / "results" / "second_id" / "extracted.jsonl").exists()

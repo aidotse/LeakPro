@@ -203,7 +203,9 @@ Results go to `<output_dir>/results/<attack id>/`:
 - `extracted.jsonl`: one record per extracted sequence with its text and matched windows.
 
 Intermediate stages are cached in `<output_dir>/artifacts`. Running the same command again resumes an
-interrupted run; changing a setting recomputes only the stages after it.
+interrupted run; changing a setting recomputes only the stages after it. Only the latest copy of each
+stage and the latest result are kept: a stage computed with new settings replaces the old copy once it
+is complete (until then the old copy stays), so going back to an earlier setting recomputes it.
 
 ## Implementation notes
 

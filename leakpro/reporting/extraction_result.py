@@ -13,14 +13,19 @@ Saved files:
 * ``<output_dir>/results/<attack_id>/result.json``: config and metrics.
 * ``<output_dir>/results/<attack_id>/extracted.jsonl``: one record per extracted sequence, with its
   text and matched windows.
+
+Only the latest result of an attack is kept: saving removes the files of earlier results with the
+same attack name (other attack ids, i.e. earlier configs) from both places.
 """
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from leakpro.reporting.audit_result import AuditResult, latex_escape
 from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 _PHASE_TITLES = {
     "initial": "Phase 1: initial extraction",
@@ -41,6 +46,13 @@ def _cell(key: str, value: Any) -> str:  # noqa: ANN401
     if key.endswith("rate"):
         return f"{100 * value:.2f}\\%"
     return latex_escape(value)
+
+
+def _result_name(result_json: Path) -> Optional[str]:
+    try:
+        return json.loads(result_json.read_text(encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 class ExtractionResult(AuditResult):
@@ -89,6 +101,19 @@ class ExtractionResult(AuditResult):
         with (result_dir / "extracted.jsonl").open("w", encoding="utf-8") as f:
             for record in self.extracted:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._remove_older_results(Path(output_dir))
+
+    def _remove_older_results(self: Self, output_dir: Path) -> None:
+        """Delete earlier results of this attack (same name, other id); other attacks' files are left alone."""
+        for result_json in (output_dir / "results").glob("*/result.json"):
+            other = result_json.parent
+            if other.name == self.id or _result_name(result_json) != self.name:
+                continue
+            shutil.rmtree(other)
+            data_object = output_dir / "data_objects" / f"{other.name}.json"
+            if data_object.exists():
+                data_object.unlink()
+            logger.info(f"Removed the earlier {self.name} result {other.name[:12]}")
 
     @classmethod
     def load(cls, result_dir: str) -> "ExtractionResult":  # noqa: ANN102

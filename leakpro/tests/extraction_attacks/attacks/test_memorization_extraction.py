@@ -166,3 +166,4 @@ def test_editing_the_prefix_pool_regenerates_conditional(tmp_path: Path) -> None
     _write_jsonl(prefixes, [{"prefix": SECRET[:k]} for k in (28, 32, 36, 40, 44, 48)])
     _run(config)
     assert len(generated_dirs() - before) == 1
+    assert len(generated_dirs()) == 1  # the copy for the old pool is removed once the new one is complete

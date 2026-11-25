@@ -14,16 +14,24 @@ Inside a stage directory:
   batches that already exist.
 * ``candidates.jsonl`` + ``done.json``: the stage's complete output. ``done.json`` is written last,
   so a stage without it is incomplete.
+
+Only the latest copy of each stage is kept: when a stage completes, the directories of the same
+stage under other keys (earlier settings, or an unfinished run of them) are deleted. A stage that is
+still running is never deleted, so an interrupted run resumes; the copy it replaces stays until the
+new one is complete. Going back to an earlier setting therefore recomputes the stages it affects.
 """
 
 import hashlib
 import json
 import os
+import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Set
 
 from leakpro.attacks.utils.extraction.records import Candidate
 from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 
 def stage_key(*parts: Any) -> str:  # noqa: ANN401
@@ -70,6 +78,15 @@ class Stage:
         self.path.mkdir(parents=True, exist_ok=True)
         _write_atomic(self.path / "candidates.jsonl", _dump(candidates))
         _write_atomic(self.path / "done.json", json.dumps({"key": self.key, "count": len(candidates), **(info or {})}))
+        self.remove_other_copies()
+
+    def remove_other_copies(self: Self) -> None:
+        """Delete the directories of this stage under other keys (``<name>-<16 hex>`` only, never ``<name>-x-...``)."""
+        pattern = re.compile(rf"{re.escape(self.name)}-[0-9a-f]{{16}}")
+        for other in self.path.parent.iterdir():
+            if other != self.path and other.is_dir() and pattern.fullmatch(other.name):
+                shutil.rmtree(other)
+                logger.info(f"Removed the older copy {other.name} of stage {self.name}")
 
     def completed_batches(self: Self) -> Set[int]:
         """Indices of generation batches already on disk."""

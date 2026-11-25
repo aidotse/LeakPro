@@ -67,7 +67,8 @@ Compared with Carlini et al.: sampling uses ``top_k=50`` and ``top_p=0.95`` (the
 a nucleus filter), and prefixes are continued greedily (they sample).
 
 Every stage is cached under ``<output_dir>/artifacts`` keyed by its settings and its inputs, so an
-interrupted run resumes and a changed setting recomputes only the stages it affects.
+interrupted run resumes and a changed setting recomputes only the stages it affects. Only the latest
+copy of each stage (and the latest result) is kept.
 """
 
 from typing import Any, Dict, List, Literal, Optional, Sequence, Union
