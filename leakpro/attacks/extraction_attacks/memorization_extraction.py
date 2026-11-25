@@ -36,6 +36,27 @@ filtering scores with the base model; verification as in Phase 1 -> **S_new**.
 **Evaluation** (auditor only): an optional audit oracle checks the selected candidates of every phase
 against the real training data. Its verdicts are reported and never fed back into the attack.
 
+**References.** The four-phase pipeline (initial extraction, expansion, fine-tuning, re-extraction) and
+its defaults are those of Matacuta, *Anything You Say Can and Will Be Used Against You: Iterative
+Memorization Extraction and Fine-Tuning in Large Language Models* (Master's thesis, University of
+Gothenburg, 2026, https://hdl.handle.net/2077/93397): 150 generations per anchor, temperature 3 -> 1
+over 20 tokens in Phase 2 with ``top_p=0.9`` and repetition penalty 1.1, LoRA ``r=16``, ``alpha=32``,
+dropout 0.1, 5 epochs, learning rate 1e-4, effective batch size 8. Phase 1's scores, prefix strategy
+and temperature decay follow Carlini et al., *Extracting Training Data from Large Language Models*
+(USENIX Security 2021); the fine-tuning phase is influenced by Nasr et al., *Scalable Extraction of
+Training Data from Aligned, Production Language Models* (2025).
+
+Where this implementation differs, so the numbers are not read as a reproduction of either work:
+
+- *Sampling* (``baseline``, ``temp_decay``): ``top_k=50`` and ``top_p=0.95``, as in the thesis.
+  Carlini et al. sample with top-n 40 and no nucleus filter.
+- *Prefixes* (``conditional``): continued greedily, as in the thesis. Carlini et al. sample
+  (top-n) from the prefixes.
+- *Fine-tuning*: plain LoRA on the unquantized model with a 10-step warm-up. The thesis used QLoRA
+  (4-bit base model).
+- *Phase 4 overlap*: only the generated text is compared with the fine-tuning corpus, so a prefix that
+  happens to be fine-tuning text does not drop the generation. The thesis compared the whole sequence.
+
 Every stage is cached under ``<output_dir>/artifacts`` keyed by its settings and its inputs, so an
 interrupted run resumes and a changed setting recomputes only the stages it affects.
 """
@@ -271,7 +292,10 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         """Return a description of the attack."""
         return {
             "title_str": "Memorization extraction",
-            "reference": "Carlini, N., Tramer, F., Wallace, E., Jagielski, M., Herbert-Voss, A., Lee, K., Roberts, A., "
+            "reference": "Matacuta, A.-C. Anything You Say Can and Will Be Used Against You: Iterative Memorization "
+                         "Extraction and Fine-Tuning in Large Language Models. Master's thesis, University of "
+                         "Gothenburg (2026). https://hdl.handle.net/2077/93397. "
+                         "Carlini, N., Tramer, F., Wallace, E., Jagielski, M., Herbert-Voss, A., Lee, K., Roberts, A., "
                          "Brown, T., Song, D., Erlingsson, U., Oprea, A., Raffel, C. Extracting Training Data from Large "
                          "Language Models. USENIX Security (2021).",
             "summary": "Black-box extraction: sample many generations, rank them with zlib and lowercase membership "

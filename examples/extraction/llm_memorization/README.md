@@ -22,6 +22,24 @@ always run (Phase 2 needs an `attacker_verifier`; `expansion: null` limits the r
 Phases 3-4 are an optional, more extensive attack for auditors who hold the weights: they run only
 when the config has a `finetune` entry (`finetune: {}` for the defaults).
 
+**References.** The four-phase pipeline and its defaults (150 generations per anchor; temperature
+3 → 1 with `top_p=0.9` and repetition penalty 1.1 in Phase 2; LoRA `r=16`, `alpha=32`, dropout 0.1,
+5 epochs, learning rate 1e-4) are those of A.-C. Matacuta, *Anything You Say Can and Will Be Used
+Against You: Iterative Memorization Extraction and Fine-Tuning in Large Language Models*, Master's
+thesis, University of Gothenburg, 2026 ([hdl.handle.net/2077/93397](https://hdl.handle.net/2077/93397)).
+Phase 1's scoring, prefix strategy and temperature decay follow Carlini et al.,
+[*Extracting Training Data from Large Language Models*](https://www.usenix.org/conference/usenixsecurity21/presentation/carlini-extracting)
+(USENIX Security 2021), and the fine-tuning phase is influenced by Nasr et al.,
+*Scalable Extraction of Training Data from Aligned, Production Language Models* (2025).
+This implementation differs from those works in these ways:
+
+| | Here | Thesis | Carlini et al. |
+|---|---|---|---|
+| Sampling (`baseline`, `temp_decay`) | `top_k=50`, `top_p=0.95` | `top_p=0.95` | top-n 40, no nucleus filter |
+| Prefixes (`conditional`) | greedy | greedy | sampled (top-n) |
+| Fine-tuning | LoRA, unquantized model, 10-step warm-up | QLoRA (4-bit base model) | n/a |
+| Phase 4 overlap check | generated text only | whole sequence | n/a |
+
 The **attacker verifier** (`attacker_verifier`) is a public corpus the attacker believes resembles the
 training data; its results drive the attack. If you, as the auditor, have the real training data, add
 it as `audit_oracle`: it is checked for every phase and reported, but never used by the attack.
