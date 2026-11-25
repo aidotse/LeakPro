@@ -93,12 +93,12 @@ What to swap:
 | Loss terms | the `losses` dict of a stage | `losses`: `CosineGradientLoss`, `L2GradientLoss`, `TVLoss`, `BNStatsLoss`, `L2ImageNormLoss`, `GroupConsistencyLoss`, `EpochOrderInvariantPrior` |
 | Representation | `rep` | `representations`: `PixelRepresentation`, `GANRepresentation`, `GIFDIntermediateRepresentation`, `UnfrozenGANRepresentation`, `DiffusionRepresentation`, `FixedRepresentation` |
 | Driver | `driver` | `drivers`: `GradientDriver` (Adam, L-BFGS, SGD), `DiffusionSamplingDriver`, `CMAESDriver` |
-| Target source | `target_source` | `targets`: `FixedTarget` (labels passed to `run_attack(target=...)`), `JointTarget` (labels optimised with the image), `NullTarget` |
+| Target source | `target_source` | `targets`: `FixedTarget` (labels passed to `run_attack(target=...)`), `JointTarget` (labels optimised with the image), `NullTarget`, `JointBoxTarget` (detection) |
 | Label inference | `Attack(target_inference=...)` | `target_inference`: `IDLGInference`, `DimitrovInference`, `GengInference` |
 | Aggregator | `aggregator` | `aggregators`: `BestLossAggregator`, `MeanAggregator`, `EpochMatchingAggregator`, `ChainAggregator` |
 | Protocol | `Task(..., FedSGD())` | `FedSGD` (one gradient) or `FedAvg(local_epochs=..., batch_size=..., lr=...)` (a weight update) |
-| Objective | `Task(CrossEntropy(), ...)` | `objectives`: `CrossEntropy`, `BinaryCrossEntropy`, `MeanSquaredError` |
-| Modality | `modality` | `modalities`: `ImageNormalizationModality` |
+| Objective | `Task(CrossEntropy(), ...)` | `objectives`: `CrossEntropy`, `BinaryCrossEntropy`, `MeanSquaredError`, `TorchvisionDetection`, `HuggingFaceDetection`, `CriterionDetection` |
+| Modality | `modality` | `modalities`: `ImageNormalizationModality`, `DetectionImageModality` |
 
 ## Threat models
 
@@ -137,6 +137,7 @@ Import from `leakpro.attacks.gia_attacks.modular.presets`; each docstring lists 
 | `ggl` | Li et al. 2022 | CMA-ES latent search, gradient-free; no gradient refinement |
 | `ggdm` | Gu et al. 2024 | diffusion sampling with similarity guidance |
 | `gradinvdiff` | Wang et al. 2025 | diffusion sampling with adaptive mean optimisation |
+| `detection` | LeakPro | object-detector inversion with oracle labels (detectors without RoIAlign, e.g. RetinaNet, DETR, YOLO) |
 
 ## Extending
 
