@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_extension import ImageAugmentor
@@ -87,17 +88,15 @@ class LeakPro:
                 Falls back to user_input_handler when None.
 
         """
+        # Extraction attacks only query the target (generation and scoring); they never train or
+        # evaluate it, so their handler needs no train()/eval() and no modality extension.
+        if configs.audit.attack_type == "extraction":
+            return ExtractionHandler(configs, user_input_handler)
+
         # Resolve which handler provides train/eval
         training_handler = model_handler if model_handler is not None else user_input_handler
 
-        # Guard against data-only handlers being silently used for training
-        source = "model_handler" if model_handler is not None else "user_input_handler"
-        for method in ("train", "eval"):
-            if getattr(training_handler, method, None) is getattr(AbstractInputHandler, method, None):
-                raise ValueError(
-                    f"{source} must implement {method}(). "
-                    "Use role='model' and override train()/eval(), or pass a model_handler."
-                )
+        self._require_train_and_eval(training_handler, "model_handler" if model_handler is not None else "user_input_handler")
 
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs, user_input_handler, training_handler)
@@ -127,6 +126,16 @@ class LeakPro:
         else:
             handler.modality_extension = None
         return handler
+
+    @staticmethod
+    def _require_train_and_eval(training_handler: AbstractInputHandler, source: str) -> None:
+        """Guard against data-only handlers being silently used for training."""
+        for method in ("train", "eval"):
+            if getattr(training_handler, method, None) is getattr(AbstractInputHandler, method, None):
+                raise ValueError(
+                    f"{source} must implement {method}(). "
+                    "Use role='model' and override train()/eval(), or pass a model_handler."
+                )
 
     @staticmethod
     def make_mia_metadata(train_result: TrainingOutput,

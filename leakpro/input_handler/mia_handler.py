@@ -16,7 +16,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
+from leakpro.input_handler.user_imports import load_model_blueprint
 from leakpro.schemas import DataLoaderConfig, LossConfig, MIAMetaDataSchema, OptimizerConfig
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
@@ -134,21 +134,7 @@ class MIAHandler:
 
     def _load_model_class(self:Self) -> None:
         """Get the model class blueprint from the target module."""
-        model_class=self.configs.target.model_class
-        if model_class is None:
-            raise ValueError("model_class not found in configs.")
-
-        module_path=self.configs.target.module_path
-        if module_path is None:
-            raise ValueError("module_path not found in configs.")
-
-        try:
-            target_module = import_module_from_file(module_path)
-            self.target_model_blueprint = get_class_from_module(target_module, model_class)
-            logger.info(f"Target model blueprint created from {model_class} in {module_path}.")
-        except Exception as e:
-            raise ValueError(f"Failed to create the target model blueprint from {model_class} in {module_path}") from e
-
+        self.target_model_blueprint = load_model_blueprint(self.configs.target.module_path, self.configs.target.model_class)
 
     def _load_target_metadata(self:Self) -> None:
         """Get the target model metadata from the trained model metadata file."""

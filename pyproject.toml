@@ -36,6 +36,10 @@ minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robust
 # LLM membership-inference attacks (leakpro/attacks/mia_attacks/llm). The attacks themselves
 # only need torch; the extras are for the example that fine-tunes and loads HuggingFace models.
 llm = ["torch", "transformers", "datasets", "accelerate", "peft"]
+# Memorization extraction attacks (leakpro/attacks/extraction_attacks). Phases 1-2 need only torch;
+# transformers provides HuggingFace models, tokenizers and generate(), elasticsearch the verifier for
+# large corpora, and peft the LoRA fine-tuning of the optional Phases 3-4.
+extraction = ["torch", "transformers", "elasticsearch", "peft"]
 # Habana Gaudi (HPU) extras. `habana-torch-plugin` itself must be pulled from
 # Habana's index (see docs.habana.ai); we list `lightning-habana` here as it
 # resolves cleanly from PyPI. Run `python -m leakpro.utils.hardware_setup
@@ -53,6 +57,8 @@ dev = [
   "torchmetrics",    # from federated
   "numba",           # from synthetic
   "transformers",    # from synthetic
+  "peft",            # from extraction (LoRA tests)
+  "elasticsearch",   # from extraction (verifier tests)
   "sentence-transformers",  # from synthetic
   "pytorch-ignite",  # from federated
   "optuna",          # federated and mia

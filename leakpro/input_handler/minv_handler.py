@@ -12,10 +12,11 @@ from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader
 
-from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
+from leakpro.input_handler.user_imports import load_model_blueprint
 from leakpro.schemas import LossConfig, MIAMetaDataSchema
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import safe_torch_load
 
 
 class MINVHandler:
@@ -52,21 +53,7 @@ class MINVHandler:
 
     def _load_model_class(self:Self) -> None:
         """Get the model class blueprint from the target module."""
-        model_class = self.configs.target.model_class
-        if model_class is None:
-            raise ValueError("model_class not found in configs.")
-
-        module_path=self.configs.target.module_path
-        if module_path is None:
-            raise ValueError("module_path not found in configs.")
-
-        try:
-            target_module = import_module_from_file(module_path)
-            self.target_model_blueprint = get_class_from_module(target_module, model_class)
-            logger.info(f"Target model blueprint created from {model_class} in {module_path}.")
-        except Exception as e:
-            raise ValueError(f"Failed to create the target model blueprint from {model_class} in {module_path}") from e
-
+        self.target_model_blueprint = load_model_blueprint(self.configs.target.module_path, self.configs.target.model_class)
 
     def _load_target_metadata(self:Self) -> None:
         """Get the target model metadata from the trained model metadata file."""
@@ -114,19 +101,9 @@ class MINVHandler:
         role: str = "model",
     ) -> nn.Module:
         """Load a trained model and metadata from an explicit model config."""
-        if model_class is None:
-            raise ValueError(f"{role} model_class not found in configs.")
-        if module_path is None:
-            raise ValueError(f"{role} module_path not found in configs.")
+        model_blueprint = load_model_blueprint(module_path, model_class, role)
         if model_folder is None:
             raise ValueError(f"{role} model folder not found in configs.")
-
-        try:
-            model_module = import_module_from_file(module_path)
-            model_blueprint = get_class_from_module(model_module, model_class)
-            logger.info(f"{role.capitalize()} model blueprint created from {model_class} in {module_path}.")
-        except Exception as e:
-            raise ValueError(f"Failed to create the {role} model blueprint from {model_class} in {module_path}") from e
 
         metadata_path = f"{model_folder}/model_metadata.pkl"
         try:
@@ -202,7 +179,4 @@ class MINVHandler:
     @staticmethod
     def _safe_torch_load(path_or_buffer: object) -> dict:
         """Load torch state dicts across torch versions with safe defaults."""
-        try:
-            return torch.load(path_or_buffer, map_location="cpu", weights_only=True)
-        except TypeError:
-            return torch.load(path_or_buffer, map_location="cpu")
+        return safe_torch_load(path_or_buffer)

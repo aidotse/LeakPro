@@ -18,6 +18,17 @@ from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 WRAPPER_PREFIXES = ("_module.", "module.")
 
 
+def safe_torch_load(path_or_buffer: object) -> dict:
+    """Load a saved state dict with ``weights_only=True`` (no arbitrary unpickling), onto the CPU.
+
+    Falls back to a plain load only on torch versions without the ``weights_only`` argument.
+    """
+    try:
+        return torch.load(path_or_buffer, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(path_or_buffer, map_location="cpu")
+
+
 def hash_config(config: dict) -> str:
     """Generate a SHA-256 hash of a dictionary."""
 

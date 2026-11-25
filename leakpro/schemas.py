@@ -8,7 +8,7 @@ from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Unio
 
 import numpy as np
 import optuna
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch.nn import Module
 
 from leakpro.risk.schemas import UseCaseProfile
@@ -73,7 +73,7 @@ class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
     random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
-    attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
+    attack_type: Literal["mia", "gia", "minv", "synthetic", "extraction"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic', 'extraction']")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
@@ -96,7 +96,7 @@ class TargetConfig(BaseModel):
     module_path: Annotated[str, Field(pattern=r".*\.py$", description="Path to the target model module")]
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
-    data_path: str = Field(..., description="Path to dataset file")
+    data_path: Optional[str] = Field(default=None, description="Path to dataset file (not used by extraction attacks)")
     dpsgd_path: Optional[str] = Field(default=None, description="Path to DP-SGD metadata file")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
@@ -148,6 +148,12 @@ class LeakProConfig(BaseModel):
     # does not trigger anything: assessment is an explicit assess_risk() call on the audit results.
     use_case: Optional[UseCaseProfile] = Field(None, description="Use-case profile for risk assessment")
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+    @model_validator(mode="after")
+    def _data_path_unless_extraction(self) -> "LeakProConfig":
+        if self.target.data_path is None and self.audit.attack_type != "extraction":
+            raise ValueError(f"target.data_path is required for attack_type {self.audit.attack_type!r}")
+        return self
 
 
 class EvalOutput(BaseModel):

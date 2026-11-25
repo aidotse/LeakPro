@@ -1,0 +1,31 @@
+# Memorization extraction on Llama-3.1-8B: Phases 1-2 (the base attack), optionally Phases 3-4.
+# Used by extraction_main.ipynb and run_extraction.py.
+# Settings not listed use the attack's defaults (see README.md).
+audit:
+  random_seed: 42
+  attack_type: extraction
+  data_modality: text
+  output_dir: ./leakpro_output_extraction          # cache and results; a re-run resumes from here
+  attack_list:
+    - attack: memorization_extraction
+      # Phase 1: 10,000 generations per strategy, 256 tokens (conditional: capped by the prefix pool)
+      initial:
+        - {type: baseline,    n: 10000, max_tokens: 256, batch_size: 16}
+        - {type: temp_decay,  n: 10000, max_tokens: 256, batch_size: 16}
+        - {type: conditional, n: 10000, max_tokens: 256, batch_size: 8,
+           prefix_path: ./data/prefixes_conditional.jsonl}   # prefix pool, built by prepare_data.py
+      filter: {top_percent: 0.05}
+      # Host, user and CA certificate from $ES_HOST / $ES_USER / $ES_CA_CERT, password from $ES_PASSWORD.
+      attacker_verifier:
+        type: elasticsearch
+        index: redpajama_chunks
+        corpus_version: redpajama-20gb
+      expansion: {}   # Phase 2, on by default (150 generations per anchor, T 3 -> 1); null: Phase 1 only
+      # Optional Phases 3-4, the extensive attack (needs the weights): LoRA r=16, 5 epochs, then Phase 1
+      # again on the tuned model. Uncomment to include them (or pass --finetune to run_extraction.py).
+      # finetune: {}
+
+target:
+  module_path: ./target_model.py
+  model_class: Llama31_8B
+  target_folder: ./target
