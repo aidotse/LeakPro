@@ -91,14 +91,14 @@ What to swap:
 | To change | Replace | With (from `leakpro.attacks.gia_attacks.modular.components...`) |
 |---|---|---|
 | Loss terms | the `losses` dict of a stage | `losses`: `CosineGradientLoss`, `L2GradientLoss`, `TVLoss`, `BNStatsLoss`, `L2ImageNormLoss`, `GroupConsistencyLoss`, `EpochOrderInvariantPrior` |
-| Representation | `rep` | `representations`: `PixelRepresentation`, `GANRepresentation`, `GIFDIntermediateRepresentation`, `UnfrozenGANRepresentation`, `DiffusionRepresentation`, `FixedRepresentation` |
+| Representation | `rep` | `representations`: `PixelRepresentation`, `GANRepresentation`, `GIFDIntermediateRepresentation`, `UnfrozenGANRepresentation`, `DiffusionRepresentation`, `TabularRepresentation`, `FixedRepresentation` |
 | Driver | `driver` | `drivers`: `GradientDriver` (Adam, L-BFGS, SGD), `DiffusionSamplingDriver`, `CMAESDriver` |
 | Target source | `target_source` | `targets`: `FixedTarget` (labels passed to `run_attack(target=...)`), `JointTarget` (labels optimised with the image), `NullTarget`, `JointBoxTarget` (detection) |
 | Label inference | `Attack(target_inference=...)` | `target_inference`: `IDLGInference`, `DimitrovInference`, `GengInference` |
 | Aggregator | `aggregator` | `aggregators`: `BestLossAggregator`, `MeanAggregator`, `EpochMatchingAggregator`, `ChainAggregator` |
 | Protocol | `Task(..., FedSGD())` | `FedSGD` (one gradient) or `FedAvg(local_epochs=..., batch_size=..., lr=...)` (a weight update) |
 | Objective | `Task(CrossEntropy(), ...)` | `objectives`: `CrossEntropy`, `BinaryCrossEntropy`, `MeanSquaredError`, `TorchvisionDetection`, `HuggingFaceDetection`, `CriterionDetection` |
-| Modality | `modality` | `modalities`: `ImageNormalizationModality`, `DetectionImageModality` |
+| Modality | `modality` | `modalities`: `ImageNormalizationModality`, `TabularModality`, `RawTabularModality`, `DetectionImageModality` |
 
 ## Threat models
 
@@ -137,6 +137,7 @@ Import from `leakpro.attacks.gia_attacks.modular.presets`; each docstring lists 
 | `ggl` | Li et al. 2022 | CMA-ES latent search, gradient-free; no gradient refinement |
 | `ggdm` | Gu et al. 2024 | diffusion sampling with similarity guidance |
 | `gradinvdiff` | Wang et al. 2025 | diffusion sampling with adaptive mean optimisation |
+| `tabular`, `tabular_raw_onehot` | Vero et al. 2023 (TabLeak) | mixed continuous/categorical reconstruction (softmax relaxation); `tabular_raw_onehot`: raw one-hot slots, cosine-only matching |
 | `detection` | LeakPro | object-detector inversion with oracle labels (detectors without RoIAlign, e.g. RetinaNet, DETR, YOLO) |
 
 ## Extending
