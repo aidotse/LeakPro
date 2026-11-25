@@ -492,16 +492,28 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         out.update(generated=generated, scored=scored, score_keys=score_keys)
         return out
 
-    def _expansion_phase(self: Self, s0: List[Candidate], s0_key: str) -> Dict[str, Any]:
-        """Phase 2: anchors from S0, expansion generation, filtering, exhaustive verification, novelty."""
-        ecfg, phase = self.configs.expansion, PHASE_EXPANSION
+    def expansion_generation(self: Self, s0: List[Candidate]) -> tuple:
+        """Phase 2's anchors, generator and generation cache key for ``s0``.
+
+        The key holds what generation depends on: the settings, seed, model, tokenizer, backend and the
+        anchors themselves (tokens and parents). It does not hold the key of S0's verification, so a
+        change there that leaves the anchors unchanged (for example a re-verification) reuses the
+        cached generations.
+        """
+        ecfg = self.configs.expansion
         anchors = build_anchors(s0, self.tokenizer, "continuation", ecfg.anchor_tokens, ecfg.min_anchor_tokens)
         if ecfg.max_anchors is not None:
             anchors = anchors[:ecfg.max_anchors]
+        generator = AnchorGenerator(anchors, ecfg, self.tokenizer, phase=PHASE_EXPANSION)
+        key = stage_key("generate", PHASE_EXPANSION, ecfg.model_dump(), self.seed, self.model_fingerprint,
+                        self.tokenizer_id, self.configs.generation_backend, anchors)
+        return anchors, generator, key
+
+    def _expansion_phase(self: Self, s0: List[Candidate], s0_key: str) -> Dict[str, Any]:
+        """Phase 2: anchors from S0, expansion generation, filtering, exhaustive verification, novelty."""
+        phase = PHASE_EXPANSION
+        anchors, generator, key = self.expansion_generation(s0)
         logger.info(f"Expansion: {len(anchors)} anchors from {len(s0)} S0 sequences")
-        generator = AnchorGenerator(anchors, ecfg, self.tokenizer, phase=phase)
-        key = stage_key("generate", phase, ecfg.model_dump(), s0_key, self.seed, self.model_fingerprint,
-                        self.tokenizer_id, self.configs.generation_backend, [a["tokens"] for a in anchors])
         gen = self._run_generator(generator, key, f"{phase}-generate")
         sco = self._score(gen, generator.name, phase, "full_text")
         # S1 is verified on every window: the novelty test needs all of them.

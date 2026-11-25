@@ -15,6 +15,7 @@ from leakpro.attacks.extraction_attacks.memorization_extraction import (
     MemorizationExtractionConfig,
 )
 from leakpro.attacks.utils.extraction import finetune as finetune_module
+from leakpro.attacks.utils.extraction.expansion import AnchorGenerator
 from leakpro.attacks.utils.extraction.finetune import TokenWindowIndex
 from leakpro.attacks.utils.extraction.records import Candidate
 from leakpro.attacks.utils.extraction.store import ArtifactStore
@@ -102,6 +103,24 @@ def test_expansion_reaching_past_s0_is_novel(tmp_path: Path) -> None:
     # Phase 1's record keeps its first-match result
     initial = next(r for r in result.extracted if r["phase"] == "initial")
     assert len(initial["attacker_matches"]) == 1
+
+
+def test_reverifying_s0_with_the_same_anchors_reuses_phase2_generations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first, _ = _run(_config(tmp_path, "ParrotLM", _expansion_attack(tmp_path)))
+    # A different attacker corpus (one unrelated document more) gives Phase 1 a new verification key,
+    # but the same S0 and therefore the same anchors: Phase 2 generation must come from the cache.
+    attack = _expansion_attack(tmp_path)
+    attack["attacker_verifier"] = {"path": _write_jsonl(tmp_path / "aux2.jsonl", [
+        {"doc_id": "aux-1", "text": f"Header. {SECRET} Footer."}, {"doc_id": "noise", "text": "unrelated"}])}
+
+    def _fail(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Phase 2 generations should have been read from the cache")
+
+    monkeypatch.setattr(AnchorGenerator, "generate_batch", _fail)
+    second, _ = _run(_config(tmp_path, "ParrotLM", attack, name="audit2.yaml"))
+    assert second.metrics["expansion"] == first.metrics["expansion"]
 
 
 def test_expansion_is_on_by_default_and_needs_an_attacker_verifier(tmp_path: Path) -> None:
