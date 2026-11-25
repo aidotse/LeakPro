@@ -1,10 +1,17 @@
 """Elasticsearch verifier against an in-process fake client (no server needed)."""
 
+import sys
+import types
 from typing import Any, Dict, List
 
 import pytest
 
-from leakpro.attacks.utils.extraction.elasticsearch_verifier import ElasticsearchVerifier, chunk_document, connect
+from leakpro.attacks.utils.extraction.elasticsearch_verifier import (
+    ElasticsearchVerifier,
+    chunk_document,
+    connect,
+    index_corpus,
+)
 from leakpro.attacks.utils.extraction.records import Windowing
 from leakpro.attacks.utils.extraction.verification import InMemoryVerifier
 
@@ -116,3 +123,61 @@ def test_connect_reads_settings_from_the_environment(monkeypatch: pytest.MonkeyP
     assert kwargs["ca_certs"].endswith("/ca.crt") and not kwargs["ca_certs"].startswith("~")
     connect(ca_certs="/explicit.crt")  # an explicit setting wins
     assert calls[1][1]["ca_certs"] == "/explicit.crt"
+
+
+class _Indices:
+    """Stand-in for `client.indices`: records what index_corpus does."""
+
+    def __init__(self) -> None:
+        self.created: Dict[str, Any] = {}
+        self.settings: List[Dict[str, Any]] = []
+        self.refreshed = False
+
+    def exists(self, index: str) -> bool:
+        return index in self.created
+
+    def delete(self, index: str) -> None:
+        self.created.pop(index)
+
+    def create(self, index: str, settings: Dict[str, Any], mappings: Dict[str, Any]) -> None:
+        self.created[index] = {"settings": settings, "mappings": mappings}
+
+    def put_settings(self, index: str, settings: Dict[str, Any]) -> None:
+        self.settings.append(settings)
+
+    def refresh(self, index: str) -> None:
+        self.refreshed = True
+
+    def get_mapping(self, index: str) -> Dict[str, Any]:
+        return {index: {"mappings": self.created[index]["mappings"]}}
+
+
+def test_index_corpus_records_chunk_settings_and_indexes_every_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
+    indexed: List[Dict[str, Any]] = []
+
+    def bulk(client: Any, actions: Any, chunk_size: int) -> tuple:
+        indexed.extend(actions)
+        return len(indexed), []
+
+    # index_corpus imports `elasticsearch.helpers` lazily; a stand-in module keeps this test free of the package
+    fake = types.ModuleType("elasticsearch")
+    fake.helpers = types.SimpleNamespace(bulk=bulk)
+    monkeypatch.setitem(sys.modules, "elasticsearch", fake)
+    client = types.SimpleNamespace(indices=_Indices())
+    count = index_corpus(client, "idx", iter([("d1", _words("w", 130)), ("d2", "Short Doc")]), chunk_words=60, stride=20)
+
+    assert count == len(indexed) == 6  # d1: chunks at 0, 20, 40, 60 and the tail at 70; d2: one chunk
+    assert [a["_source"]["word_start"] for a in indexed] == [0, 20, 40, 60, 70, 0]
+    assert indexed[-1]["_source"] == {"doc_id": "d2", "word_start": 0, "text": "short doc"}
+    mappings = client.indices.created["idx"]["mappings"]
+    assert mappings["_meta"] == {"chunk_words": 60, "stride": 20}
+    assert mappings["properties"]["text"]["index_options"] == "positions"
+    assert client.indices.refreshed and client.indices.settings[-1] == {"index": {"refresh_interval": "1s"}}
+
+    es = FakeES([("d1", "x")])
+    es.indices = client.indices
+    assert ElasticsearchVerifier(es, "idx").max_window_words() == 41  # 60 - 20 + 1
+
+
+def test_max_window_words_defaults_for_an_index_without_meta() -> None:
+    assert ElasticsearchVerifier(FakeES([("d1", "x")]), "idx").max_window_words() == 51

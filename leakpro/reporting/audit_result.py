@@ -14,15 +14,7 @@ changing the report handler.
 from abc import ABC, abstractmethod
 from typing import List
 
-_LATEX_SPECIAL = {
-    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
-    "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
-}
-
-
-def latex_escape(text: object) -> str:
-    """Escape LaTeX special characters in ``str(text)``."""
-    return "".join(_LATEX_SPECIAL.get(ch, ch) for ch in str(text))
+from leakpro.utils.latex import latex_escape  # noqa: F401  (re-exported for the report sections)
 
 
 class AuditResult(ABC):

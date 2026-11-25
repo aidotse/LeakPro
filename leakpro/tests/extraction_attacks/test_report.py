@@ -79,8 +79,6 @@ def test_custom_audit_result_gets_its_own_section(tmp_path: Path) -> None:
 def test_run_audit_with_pdf(tmp_path: Path) -> None:
     corpus = tmp_path / "aux.jsonl"
     corpus.write_text(json.dumps({"doc_id": "a", "text": SECRET}) + "\n")
-    prefixes = tmp_path / "prefixes.jsonl"
-    prefixes.write_text(json.dumps({"prefix": SECRET[:4]}) + "\n")
     config = {
         "audit": {"random_seed": 1, "attack_type": "extraction", "data_modality": "text",
                   "output_dir": str(tmp_path / "out"),
@@ -88,7 +86,7 @@ def test_run_audit_with_pdf(tmp_path: Path) -> None:
                                    "initial": [{"type": "baseline", "n": 2, "batch_size": 2, "max_tokens": 300}],
                                    "attacker_verifier": {"path": str(corpus)}}]},
         "target": {"module_path": fixtures.__file__, "model_class": "ParrotLM",
-                   "target_folder": str(tmp_path / "target"), "data_path": str(prefixes)},
+                   "target_folder": str(tmp_path / "target")},
     }
     path = tmp_path / "audit.yaml"
     path.write_text(yaml.safe_dump(config))

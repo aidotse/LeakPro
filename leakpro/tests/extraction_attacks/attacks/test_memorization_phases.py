@@ -29,12 +29,15 @@ def _write_jsonl(path: Path, records: List[Dict]) -> str:
 
 def _config(tmp_path: Path, model_class: str, attack: Dict, name: str = "audit.yaml") -> str:
     prefixes = _write_jsonl(tmp_path / "prefixes.jsonl", [{"prefix": SECRET[:k]} for k in (4, 8, 12)])
+    for strategy in attack.get("initial", []):
+        if strategy["type"] == "conditional":
+            strategy.setdefault("prefix_path", prefixes)
     config = {
         "audit": {"random_seed": 3, "attack_type": "extraction", "data_modality": "text",
                   "output_dir": str(tmp_path / "out"),
                   "attack_list": [{"attack": "memorization_extraction", "generation_backend": "torch", **attack}]},
         "target": {"module_path": fixtures.__file__, "model_class": model_class,
-                   "target_folder": str(tmp_path / "target"), "data_path": prefixes},
+                   "target_folder": str(tmp_path / "target")},
     }
     path = tmp_path / name
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -53,7 +56,8 @@ def _expansion_attack(tmp_path: Path, initial_tokens: int = 300, novelty: str = 
     corpus = _write_jsonl(tmp_path / "aux.jsonl", [{"doc_id": "aux-1", "text": f"Header. {SECRET} Footer."}])
     return {
         # S0: the continuation of "w0x ", i.e. SECRET from w1x on, up to `initial_tokens` characters in total
-        "initial": [{"type": "conditional", "n": 1, "batch_size": 1, "max_tokens": initial_tokens}],
+        "initial": [{"type": "conditional", "n": 1, "batch_size": 1, "max_tokens": initial_tokens,
+                     "prefix_path": str(tmp_path / "prefixes.jsonl")}],  # written by _config
         "attacker_verifier": {"path": corpus},
         # The anchor starts at w1x. ParrotLM continues by position, so the 32-character prefix
         # "w1x ... w8x " is followed by "w8x w9x w10x ...": the repeated w8x moves the window grid by

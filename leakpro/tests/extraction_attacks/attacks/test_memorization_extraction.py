@@ -26,6 +26,9 @@ def _write_jsonl(path: Path, records: list) -> str:
 
 def _audit(tmp_path: Path, attack: dict, name: str = "audit.yaml") -> str:
     prefixes = _write_jsonl(tmp_path / "prefixes.jsonl", [{"prefix": SECRET[:k]} for k in (4, 8, 12, 16, 20, 24)])
+    for strategy in attack.get("initial", []):
+        if strategy["type"] == "conditional":
+            strategy.setdefault("prefix_path", prefixes)
     config = {
         "audit": {
             "random_seed": 3,
@@ -38,7 +41,6 @@ def _audit(tmp_path: Path, attack: dict, name: str = "audit.yaml") -> str:
             "module_path": fixtures.__file__,
             "model_class": "ParrotLM",
             "target_folder": str(tmp_path / "target"),
-            "data_path": prefixes,
         },
     }
     path = tmp_path / name

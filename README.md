@@ -41,6 +41,9 @@ LeakPro is designed to minimize user burden, requiring minimal manual input and 
 - **Synthetic Data Attacks:**  
   In this WP, adversaries only have access to a synthetic dataset generated from sensitive data. The goal is to infer information about the original dataset using only interactions with the synthetic data.  
 
+- **Training-Data Extraction (LLMs):**  
+  Attacks that make a language model reproduce verbatim sequences of its training data, verified against a reference corpus (`attack_type: extraction`).  
+
 Each leg follows core design principles: easy integration of new attacks, model agnosticism, and support for diverse data modalities. Currently, it supports tabular, image, text, and graph data, with time series integration underway.  
 
 
@@ -181,6 +184,11 @@ target:
   target_folder: "./target"
   data_path: "./data/dataset.pkl"
 ```
+
+**Training-data extraction** from language models runs as `attack_type: extraction` and needs the
+`extraction` extra (`pip install -e ".[extraction]"`: transformers, elasticsearch, peft). It only
+queries the model, so its handler needs no `train()`/`eval()`, and `target.data_path` is not used. See
+the [Llama-3.1-8B memorization extraction example](examples/extraction/llm_memorization/README.md).
 
 For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakPro/wiki)**:
 - [Attack Modules overview](https://github.com/aidotse/LeakPro/wiki/Attack-Modules)

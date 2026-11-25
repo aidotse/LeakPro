@@ -73,12 +73,7 @@ class LeakPro:
         add_file_handler(logger, log_path)
 
         # Initialize handler and attack scheduler
-        # Extraction attacks only query the target (generation and scoring); they never train or
-        # evaluate it, so their handler needs no train()/eval() and no modality extension.
-        if configs.audit.attack_type == "extraction":
-            self.handler = ExtractionHandler(configs, user_input_handler)
-        else:
-            self.handler = self.setup_handler(user_input_handler, configs, model_handler)
+        self.handler = self.setup_handler(user_input_handler, configs, model_handler)
         self.attack_scheduler = AttackScheduler(self.handler, output_dir=configs.audit.output_dir)
 
     def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict,
@@ -93,17 +88,15 @@ class LeakPro:
                 Falls back to user_input_handler when None.
 
         """
+        # Extraction attacks only query the target (generation and scoring); they never train or
+        # evaluate it, so their handler needs no train()/eval() and no modality extension.
+        if configs.audit.attack_type == "extraction":
+            return ExtractionHandler(configs, user_input_handler)
+
         # Resolve which handler provides train/eval
         training_handler = model_handler if model_handler is not None else user_input_handler
 
-        # Guard against data-only handlers being silently used for training
-        source = "model_handler" if model_handler is not None else "user_input_handler"
-        for method in ("train", "eval"):
-            if getattr(training_handler, method, None) is getattr(AbstractInputHandler, method, None):
-                raise ValueError(
-                    f"{source} must implement {method}(). "
-                    "Use role='model' and override train()/eval(), or pass a model_handler."
-                )
+        self._require_train_and_eval(training_handler, "model_handler" if model_handler is not None else "user_input_handler")
 
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs, user_input_handler, training_handler)
@@ -133,6 +126,16 @@ class LeakPro:
         else:
             handler.modality_extension = None
         return handler
+
+    @staticmethod
+    def _require_train_and_eval(training_handler: AbstractInputHandler, source: str) -> None:
+        """Guard against data-only handlers being silently used for training."""
+        for method in ("train", "eval"):
+            if getattr(training_handler, method, None) is getattr(AbstractInputHandler, method, None):
+                raise ValueError(
+                    f"{source} must implement {method}(). "
+                    "Use role='model' and override train()/eval(), or pass a model_handler."
+                )
 
     @staticmethod
     def make_mia_metadata(train_result: TrainingOutput,

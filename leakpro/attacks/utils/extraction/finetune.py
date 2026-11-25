@@ -24,7 +24,7 @@ Phase 4:
 
 import contextlib
 import math
-from typing import Any, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Iterator, List, Optional, Sequence, Set
 
 import numpy as np
 import torch
@@ -260,13 +260,15 @@ class TokenWindowIndex:
     def __init__(self: Self, texts: Sequence[str], tok: TokenizerLike, window: int = 30) -> None:
         self.tok = tok
         self.window = window
-        self.windows: Set[Tuple[int, ...]] = set()
+        # A 64-bit hash per window instead of the tuple of token ids: the same test at a fraction of the
+        # memory (Python hashes tuples of ints deterministically; a collision is ~1e-9 likely here).
+        self.windows: Set[int] = set()
         for text in texts:
             ids = tok.encode(normalize(text), add_special_tokens=False)
             for i in range(len(ids) - window + 1):
-                self.windows.add(tuple(ids[i:i + window]))
+                self.windows.add(hash(tuple(ids[i:i + window])))
 
     def overlaps(self: Self, text: str) -> bool:
         """Whether ``text`` shares any window with the indexed texts."""
         ids = self.tok.encode(normalize(text), add_special_tokens=False)
-        return any(tuple(ids[i:i + self.window]) in self.windows for i in range(len(ids) - self.window + 1))
+        return any(hash(tuple(ids[i:i + self.window])) in self.windows for i in range(len(ids) - self.window + 1))

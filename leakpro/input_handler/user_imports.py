@@ -12,6 +12,7 @@ import sys
 from torch import nn, optim
 
 from leakpro.utils.import_helper import Callable, ModuleType
+from leakpro.utils.logger import logger
 
 
 def import_module_from_file(filepath: str) -> ModuleType:
@@ -54,6 +55,23 @@ def get_class_from_module(module:ModuleType, class_name:str) -> Callable:
         if name == class_name:
             return obj
     raise ValueError(f"Class {class_name} not found in module {module.__name__}")
+
+def load_model_blueprint(module_path: str, model_class: str, role: str = "target") -> Callable:
+    """The model class ``model_class`` from the file ``module_path`` (``target.module_path`` / ``model_class``).
+
+    Shared by the input handlers, so every attack type resolves a model class the same way.
+    """
+    if model_class is None:
+        raise ValueError(f"{role} model_class not found in configs.")
+    if module_path is None:
+        raise ValueError(f"{role} module_path not found in configs.")
+    try:
+        blueprint = get_class_from_module(import_module_from_file(module_path), model_class)
+    except Exception as e:
+        raise ValueError(f"Failed to create the {role} model blueprint from {model_class} in {module_path}") from e
+    logger.info(f"{role.capitalize()} model blueprint created from {model_class} in {module_path}.")
+    return blueprint
+
 
 def get_optimizer_mapping() -> dict:
     """Return a dictionary mapping optimizer names to optimizer classes."""

@@ -20,8 +20,10 @@ seed they sample the same tokens.
 while 5.x has no default, so leaving it out would change the samples between versions.
 """
 
+import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List, Literal, Optional, Protocol, Sequence, Tuple
 
 import numpy as np
@@ -30,6 +32,7 @@ from torch import Tensor, nn
 
 from leakpro.attacks.utils.extraction.records import Candidate
 from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 
 class TokenizerLike(Protocol):
@@ -305,6 +308,17 @@ def batch_seed(seed: int, strategy_index: int, batch_index: int) -> int:
     """Seed for one generation batch, independent of batch size changes elsewhere and of resumes."""
     return int(np.random.SeedSequence([seed, strategy_index, batch_index]).generate_state(1)[0])
 
+
+
+def load_prefixes(path: str) -> List[str]:
+    """Prefix texts of a conditional strategy's pool: one ``{"prefix": "..."}`` JSON record per line, in file order."""
+    pool = Path(path)
+    if not pool.is_file():
+        raise FileNotFoundError(f"Prefix pool not found at {pool}")
+    with pool.open(encoding="utf-8") as f:
+        prefixes = [json.loads(line)["prefix"] for line in f if line.strip()]
+    logger.info(f"Loaded {len(prefixes)} prefixes from {pool}")
+    return prefixes
 
 class StrategyGenerator:
     """Generate the candidates of one prompting strategy, batch by batch.

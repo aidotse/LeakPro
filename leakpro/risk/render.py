@@ -11,6 +11,7 @@ produced it. The assumption list and the policy version are part of the output, 
 from leakpro.risk.policy import VULNERABILITY_BANDS_SOURCE
 from leakpro.risk.schemas import RiskAssessment
 from leakpro.utils.import_helper import Optional
+from leakpro.utils.latex import latex_escape
 
 
 def _fmt(value: Optional[float], digits: int = 4) -> str:
@@ -120,25 +121,6 @@ def to_markdown(assessment: RiskAssessment) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _tex_escape(text: str) -> str:
-    """Escape LaTeX special characters in free text.
-
-    Args:
-    ----
-        text: Raw text.
-
-    Returns:
-    -------
-        Text safe to inline in a LaTeX document.
-
-    """
-    for char, replacement in (("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"), ("$", r"\$"),
-                              ("#", r"\#"), ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
-                              ("~", r"\textasciitilde{}"), ("^", r"\textasciicircum{}")):
-        text = text.replace(char, replacement)
-    return text
-
-
 def to_latex(assessment: RiskAssessment) -> str:
     """Render an assessment as a LaTeX section for the PDF report.
 
@@ -165,12 +147,12 @@ def to_latex(assessment: RiskAssessment) -> str:
         ("Expected cost", _fmt(c.expected_cost, 2)),
         ("Vulnerability band (advisory)", c.vulnerability_band or "not reported"),
     ]
-    body = "\n".join(f"        {_tex_escape(label)} & {_tex_escape(value)} \\\\" for label, value in rows)
-    assumptions = "\n".join(f"        \\item {_tex_escape(a)}" for a in assessment.assumptions)
+    body = "\n".join(f"        {latex_escape(label)} & {latex_escape(value)} \\\\" for label, value in rows)
+    assumptions = "\n".join(f"        \\item {latex_escape(a)}" for a in assessment.assumptions)
     latex = f"""
         \\section{{Risk assessment}}
-        Attack {_tex_escape(m.attack_name)}, operating point $\\alpha = {d.tolerated_fpr}$,
-        declared attacker prior $\\pi = {d.attacker_prior}$, policy {_tex_escape(assessment.policy_version)}.
+        Attack {latex_escape(m.attack_name)}, operating point $\\alpha = {d.tolerated_fpr}$,
+        declared attacker prior $\\pi = {d.attacker_prior}$, policy {latex_escape(assessment.policy_version)}.
 
         \\begin{{tabularx}}{{\\textwidth}}{{lX}}
         \\hline
@@ -184,7 +166,7 @@ def to_latex(assessment: RiskAssessment) -> str:
         \\end{{enumerate}}
         """
     if assessment.warnings:
-        warnings = "\n".join(f"        \\item {_tex_escape(w)}" for w in assessment.warnings)
+        warnings = "\n".join(f"        \\item {latex_escape(w)}" for w in assessment.warnings)
         latex += f"""
         \\subsection*{{Warnings}}
         \\begin{{itemize}}
@@ -194,6 +176,6 @@ def to_latex(assessment: RiskAssessment) -> str:
     if d.notes:
         latex += f"""
         \\subsection*{{Notes}}
-        {_tex_escape(d.notes)}
+        {latex_escape(d.notes)}
         """
     return latex

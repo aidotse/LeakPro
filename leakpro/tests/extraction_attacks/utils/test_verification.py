@@ -52,3 +52,12 @@ def test_corpus_id_tracks_contents(tmp_path: Path) -> None:
     assert v1.num_documents == 2
     assert v1.corpus_id == InMemoryVerifier([("a", "X  y z"), ("1", "u v")]).corpus_id
     assert v1.corpus_id != InMemoryVerifier([("a", "x y z")]).corpus_id
+
+
+def test_first_mode_finds_a_match_beyond_the_first_lookup_batch() -> None:
+    # 60 junk words put the first verified window at index 12, past the first batch of 8 windows
+    text = " ".join([f"junk{i}" for i in range(60)] + WORDS[10:60])
+    v = _verifier()
+    (match,) = v.verify(text, Windowing(), "first")
+    assert match.cand_start == 60 and v.first_mode_batch == 8
+    assert v.verify(text, Windowing(), "all")[0].cand_start == 60

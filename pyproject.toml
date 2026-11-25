@@ -57,6 +57,7 @@ dev = [
   "numba",           # from synthetic
   "transformers",    # from synthetic
   "peft",            # from extraction (LoRA tests)
+  "elasticsearch",   # from extraction (verifier tests)
   "sentence-transformers",  # from synthetic
   "pytorch-ignite",  # from federated
   "optuna",          # federated and mia

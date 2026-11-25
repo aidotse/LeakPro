@@ -12,7 +12,8 @@ audit:
       initial:
         - {type: baseline,    n: 10000, max_tokens: 256, batch_size: 16}
         - {type: temp_decay,  n: 10000, max_tokens: 256, batch_size: 16}
-        - {type: conditional, n: 10000, max_tokens: 256, batch_size: 8}
+        - {type: conditional, n: 10000, max_tokens: 256, batch_size: 8,
+           prefix_path: ./data/prefixes_conditional.jsonl}   # prefix pool, built by prepare_data.py
       filter: {top_percent: 0.05}
       # Host, user and CA certificate from $ES_HOST / $ES_USER / $ES_CA_CERT, password from $ES_PASSWORD.
       attacker_verifier:
@@ -28,4 +29,3 @@ target:
   module_path: ./target_model.py
   model_class: Llama31_8B
   target_folder: ./target
-  data_path: ./data/prefixes_conditional.jsonl   # prefix pool for the conditional strategy

@@ -64,7 +64,9 @@ def build_config(args: argparse.Namespace) -> dict:
     if args.no_finetune:
         attack.pop("finetune", None)
     audit["output_dir"] = str(args.output_dir or here / audit["output_dir"])
-    target["data_path"] = str(args.prefixes or here / target["data_path"])
+    for strategy in attack["initial"] + (attack.get("finetune") or {}).get("strategies", []):
+        if strategy.get("type") == "conditional":
+            strategy["prefix_path"] = str(args.prefixes or here / strategy["prefix_path"])
     target["module_path"] = str(here / target["module_path"])
     target["target_folder"] = str(here / target["target_folder"])
     return config
@@ -72,14 +74,15 @@ def build_config(args: argparse.Namespace) -> dict:
 
 def check_inputs(config: dict, args: argparse.Namespace) -> list:
     """Fail fast, before the model is loaded, on a missing input; returns the configured phases."""
-    prefixes = Path(config["target"]["data_path"])
     attack = config["audit"]["attack_list"][0]
     verifier = attack.get("attacker_verifier") or {}
-    if not prefixes.is_file():
-        raise SystemExit(f"Prefix pool {prefixes} not found: build it with prepare_data.py (README.md) "
-                         "or pass --prefixes")
-    with prefixes.open() as f:
-        print(f"prefix pool: {sum(1 for _ in f)} prefixes ({prefixes})")
+    pools = {Path(s["prefix_path"]) for s in attack["initial"] if s.get("type") == "conditional"}
+    for prefixes in sorted(pools):
+        if not prefixes.is_file():
+            raise SystemExit(f"Prefix pool {prefixes} not found: build it with prepare_data.py (README.md) "
+                             "or pass --prefixes")
+        with prefixes.open() as f:
+            print(f"prefix pool: {sum(1 for _ in f)} prefixes ({prefixes})")
     if verifier.get("type") == "elasticsearch":
         missing = [k for k in ("ES_HOST", "ES_USER", "ES_PASSWORD") if not os.environ.get(k)]
         if missing:
@@ -121,7 +124,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--audit", type=Path, default=Path(__file__).with_name("audit.yaml"),
                     help="audit config (default audit.yaml); the options below override it")
-    ap.add_argument("--prefixes", type=Path, help="prefix pool for the conditional strategy (target.data_path)")
+    ap.add_argument("--prefixes", type=Path, help="prefix pool for the conditional strategy (its prefix_path)")
     ap.add_argument("--es-env", type=Path, default=Path.home() / "es_env.sh",
                     help="optional shell file with `export ES_...=` lines")
     ap.add_argument("--index", help="Elasticsearch index of the reference corpus")

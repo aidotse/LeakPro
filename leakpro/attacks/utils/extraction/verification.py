@@ -40,6 +40,9 @@ class Verifier(ABC):
         """:meth:`lookup` for several windows; backends override it to batch their queries."""
         return [self.lookup(w) for w in windows]
 
+    #: Windows looked up per request in ``first`` mode; the scan stops after the first batch with a match.
+    first_mode_batch: int = 8
+
     def verify(self: Self, text: str, windowing: Windowing, mode: VerifyMode = "first") -> List[Match]:
         """Return the verified windows of ``text``.
 
@@ -61,10 +64,13 @@ class Verifier(ABC):
                 Match(doc_id=hit[0], corpus_offset=hit[1], cand_start=start, cand_end=end, window=window)
                 for (start, end, window), hit in zip(windows, hits) if hit is not None
             ]
-        for start, end, window in windows:
-            hit = self.lookup(window)
-            if hit is not None:
-                return [Match(doc_id=hit[0], corpus_offset=hit[1], cand_start=start, cand_end=end, window=window)]
+        # Same result as checking one window at a time (the first verified window in text order), with
+        # one request per batch instead of one per window.
+        for i in range(0, len(windows), self.first_mode_batch):
+            batch = windows[i:i + self.first_mode_batch]
+            for (start, end, window), hit in zip(batch, self.lookup_many([w for _, _, w in batch])):
+                if hit is not None:
+                    return [Match(doc_id=hit[0], corpus_offset=hit[1], cand_start=start, cand_end=end, window=window)]
         return []
 
 

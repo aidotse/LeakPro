@@ -14,11 +14,15 @@ Chunks are ``chunk_words`` long and start every ``stride`` words. Any window of 
 ``chunk_words - stride + 1`` words therefore lies inside one chunk; the defaults (100 / 50) cover
 windows up to 51 words. The last chunk of a document is
 aligned to its end and documents shorter than one chunk are indexed whole, so no tail is lost.
+:func:`index_corpus` records the chunk settings in the index's ``_meta``, and
+:meth:`ElasticsearchVerifier.max_window_words` reads them back, so a window size the index cannot
+hold is rejected before the attack runs (it would otherwise verify nothing, without a warning).
 
 The ``elasticsearch`` package is imported only when a client is created from settings
 (:meth:`ElasticsearchVerifier.connect`); tests pass any object with ``search``/``msearch``/``count``.
 """
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -113,7 +117,8 @@ def index_corpus(
     if recreate and client.indices.exists(index=index):
         client.indices.delete(index=index)
     if not client.indices.exists(index=index):
-        client.indices.create(index=index, **INDEX_SETTINGS)
+        mappings = {**INDEX_SETTINGS["mappings"], "_meta": {"chunk_words": chunk_words, "stride": stride}}
+        client.indices.create(index=index, settings=INDEX_SETTINGS["settings"], mappings=mappings)
     client.indices.put_settings(index=index, settings={"index": {"refresh_interval": "-1"}})
 
     def _actions() -> Iterator[Dict[str, Any]]:
@@ -159,6 +164,17 @@ class ElasticsearchVerifier(Verifier):
         count = client.count(index=index)["count"]
         self._corpus_id = f"elasticsearch:{index}:{count}:{corpus_version or ''}"
         self._cache: Dict[str, Optional[Tuple[str, int]]] = {}
+
+    def max_window_words(self: Self) -> int:
+        """Longest window that always lies inside one chunk: ``chunk_words - stride + 1``.
+
+        Read from the index's ``_meta`` (written by :func:`index_corpus`); an index without it is
+        assumed to use the defaults (100 / 50, so 51 words).
+        """
+        meta: Dict[str, Any] = {}
+        with contextlib.suppress(AttributeError, KeyError, TypeError):
+            meta = self.client.indices.get_mapping(index=self.index)[self.index]["mappings"].get("_meta") or {}
+        return int(meta.get("chunk_words", 100)) - int(meta.get("stride", 50)) + 1
 
     @property
     def corpus_id(self: Self) -> str:

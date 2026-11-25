@@ -90,7 +90,7 @@ from leakpro.attacks.utils.extraction.finetune import (
     param_dtypes,
     train_lora,
 )
-from leakpro.attacks.utils.extraction.generation import StrategyGenerator
+from leakpro.attacks.utils.extraction.generation import StrategyGenerator, load_prefixes
 from leakpro.attacks.utils.extraction.progress import Progress
 from leakpro.attacks.utils.extraction.records import Candidate, Windowing
 from leakpro.attacks.utils.extraction.scoring import SCORE_NAMES, drop_short_and_duplicates, score_candidates, select_top_union
@@ -101,14 +101,11 @@ from leakpro.signals.token_evidence import CausalLMModel
 from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import fingerprint_model
+from leakpro.utils.save_load import fingerprint_model, safe_torch_load
 
 PHASE_INITIAL = "initial"
 PHASE_EXPANSION = "expansion"
 PHASE_FINETUNED = "finetuned"
-
-LLAMA_LORA_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-
 
 class GenStrategyConfig(BaseModel):
     """One prompting strategy."""
@@ -124,11 +121,17 @@ class GenStrategyConfig(BaseModel):
     t_start: float = Field(default=10.0, gt=0, description="temp_decay: first-token temperature")
     t_end: float = Field(default=1.0, gt=0, description="temp_decay: temperature after the decay")
     decay_steps: int = Field(default=20, ge=1, description="temp_decay: tokens over which the temperature decays")
+    prefix_path: Optional[str] = Field(
+        default=None,
+        description='conditional: prefix pool, a JSON-lines file with one {"prefix": "..."} record per line',
+    )
 
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def _defaults(self: Self) -> Self:
+        if self.type == "conditional" and not self.prefix_path:
+            raise ValueError("A conditional strategy needs `prefix_path` (its prefix pool)")
         if self.name is None:
             self.name = self.type
         if self.batch_size is None:
@@ -229,8 +232,11 @@ class FinetuneConfig(BaseModel):
     lora_r: int = Field(default=16, ge=1)
     lora_alpha: int = Field(default=32, ge=1)
     lora_dropout: float = Field(default=0.1, ge=0, lt=1)
-    target_modules: Union[List[str], str] = Field(default_factory=lambda: list(LLAMA_LORA_MODULES),
-                                                  description="Modules given LoRA adapters, or 'all-linear'")
+    target_modules: Union[List[str], str] = Field(
+        default="all-linear",
+        description="Modules given LoRA adapters: a list of module names, or 'all-linear' (every linear layer "
+                    "except the output head; for Llama the attention and MLP projections, as in the thesis)",
+    )
     epochs: int = Field(default=5, ge=1)
     batch_size: int = Field(default=1, ge=1)
     grad_accum: int = Field(default=8, ge=1)
@@ -339,6 +345,12 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         self.store = ArtifactStore(f"{self.output_dir}/artifacts")
         self.windowing = Windowing(**cfg.windowing.model_dump())
         self.attacker_verifier = build_verifier(cfg.attacker_verifier)
+        if isinstance(self.attacker_verifier, ElasticsearchVerifier):
+            limit = self.attacker_verifier.max_window_words()
+            if self.windowing.size > limit:
+                raise ValueError(f"windowing.size {self.windowing.size} exceeds the {limit} words that index "
+                                 f"{self.attacker_verifier.index!r} can match (chunk_words - stride + 1): every "
+                                 "lookup would miss. Use a smaller window or re-index with longer chunks.")
         self.model_fingerprint = fingerprint_model(self.target_model)
         self.tokenizer_id = str(getattr(self.tokenizer, "name_or_path", type(self.tokenizer).__name__))
         self._peft = None
@@ -371,10 +383,11 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
 
     def _generate(self: Self, index: int, strategy: GenStrategyConfig, phase: str, model_key: str) -> Dict[str, Any]:
         """Generate one prompting strategy with the current model (``model_key`` identifies it)."""
-        prefixes = self.handler.prefixes() if strategy.type == "conditional" else None
+        prefixes = load_prefixes(strategy.prefix_path) if strategy.type == "conditional" else None
         generator = StrategyGenerator(strategy.name, index, strategy, self.tokenizer, prefixes, phase=phase)
         prefix_digest = stage_key(generator.prefixes) if prefixes is not None else None
-        key = stage_key("generate", phase, index, strategy.model_dump(), self.seed, model_key,
+        # The prefix pool enters the key by content (prefix_digest), not by where it is stored.
+        key = stage_key("generate", phase, index, strategy.model_dump(exclude={"prefix_path"}), self.seed, model_key,
                         self.tokenizer_id, self.configs.generation_backend, prefix_digest)
         return self._run_generator(generator, key, f"{phase}-generate-{strategy.name}")
 
@@ -493,7 +506,9 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
             anchors = anchors[:ecfg.max_anchors]
         logger.info(f"Expansion: {len(anchors)} anchors from {len(s0)} S0 sequences")
         generator = AnchorGenerator(anchors, ecfg, self.tokenizer, phase=phase)
-        key = stage_key("generate", phase, ecfg.model_dump(), s0_key, self.seed, self.model_fingerprint,
+        # Settings that act after generation (how full_text is joined, the novelty test) stay out of its key.
+        gen_settings = ecfg.model_dump(exclude={"prompt_join", "novelty"})
+        key = stage_key("generate", phase, gen_settings, s0_key, self.seed, self.model_fingerprint,
                         self.tokenizer_id, self.configs.generation_backend, [a["tokens"] for a in anchors])
         gen = self._run_generator(generator, key, f"{phase}-generate")
         # full_text is rebuilt with the configured join, so cached generations serve either setting.
@@ -530,7 +545,7 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
         adapter_path = stage.path / "adapter.pt"
         if stage.is_done():
             logger.info("Reusing the cached LoRA adapter")
-            load_lora_state(self._peft, torch.load(adapter_path, map_location=self.device))
+            load_lora_state(self._peft, safe_torch_load(adapter_path))
         else:
             logger.info(f"Fine-tuning on {len(corpus)} texts")
             losses = train_lora(self._peft, corpus, self.tokenizer, self.device, epochs=ftc.epochs,

@@ -83,7 +83,7 @@ def test_batch_seed_is_stable_and_distinct() -> None:
 def test_conditional_rows_are_cut_to_max_tokens_in_total() -> None:
     tok = CharTokenizer()
     prefixes = [SECRET[:5], SECRET[:20]]
-    cfg = GenStrategyConfig(type="conditional", n=2, max_tokens=40)
+    cfg = GenStrategyConfig(type="conditional", n=2, max_tokens=40, prefix_path="prefixes.jsonl")
     gen = StrategyGenerator("conditional", 2, cfg, tok, prefixes)
     cands = gen.generate_batch(0, ParrotLM(), seed=1, device=CPU, backend="torch")
     assert [len(c.prompt_ids) + len(c.gen_ids) for c in cands] == [40, 40]
