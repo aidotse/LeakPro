@@ -33,6 +33,7 @@ synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations",
              "diffusers>=0.27", "cma>=3.3", "lpips"]
 minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
+extraction = ["torch", "optuna"]
 # LLM membership-inference attacks (leakpro/attacks/mia_attacks/llm). The attacks themselves
 # only need torch; the extras are for the example that fine-tunes and loads HuggingFace models.
 llm = ["torch", "transformers", "datasets", "accelerate", "peft"]

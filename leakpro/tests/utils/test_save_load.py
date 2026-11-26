@@ -5,10 +5,9 @@
 """Unit tests for leakpro.utils.save_load.
 
 Tests cover:
-- hash_model(): byte-identical to the legacy ``.numpy().tobytes()`` path for float32 and
-  int64 tensors (so no existing cached hash changes), including the 0-dim
-  ``num_batches_tracked`` buffer that BatchNorm layers carry
-- hash_model(): works for bfloat16 state dicts, which numpy cannot represent
+- hash_model(): matches legacy NumPy hashes for linear and BatchNorm models,
+  transposed parameters, and scalar and transposed buffers across dtypes
+- hash_model(): hashes BF16 weights and scalar buffers deterministically and detects changes to either
 - hash_model(): distinguishes models with different weights
 - hash_config() / hash_indices() / hash_attack(): determinism and order handling
 - unwrapped_state_dict(): strips only leading wrapper prefixes, keeps inner names
@@ -57,34 +56,23 @@ def batchnorm_model() -> nn.Module:
     return model
 
 
-def test_hash_model_matches_legacy_bytes_for_linear(linear_model: nn.Module) -> None:
-    """float32-only state dicts hash exactly as before."""
-    assert hash_model(linear_model) == _legacy_hash_model(linear_model)
+def test_hash_model_preserves_numpy_supported_digests(
+    linear_model: nn.Module, batchnorm_model: nn.Module,
+) -> None:
+    transposed_model = nn.Linear(4, 3)
+    transposed_model.weight = nn.Parameter(torch.arange(12.0).reshape(4, 3).t())
+    assert not transposed_model.weight.is_contiguous()
+    for model in (linear_model, batchnorm_model, transposed_model):
+        assert hash_model(model) == _legacy_hash_model(model), repr(model)
 
-
-def test_hash_model_matches_legacy_bytes_for_batchnorm(batchnorm_model: nn.Module) -> None:
-    """Mixed float32 / int64 / 0-dim state dicts hash exactly as before."""
-    assert hash_model(batchnorm_model) == _legacy_hash_model(batchnorm_model)
-
-
-def test_hash_model_handles_non_contiguous_tensors() -> None:
-    """A transposed (non-contiguous) parameter hashes the same bytes as the legacy path."""
-    model = nn.Linear(4, 3)
-    with torch.no_grad():
-        model.weight = nn.Parameter(torch.arange(12.0).reshape(4, 3).t())
-    assert not model.weight.is_contiguous()
-    assert hash_model(model) == _legacy_hash_model(model)
-
-
-def test_hash_model_supports_bfloat16() -> None:
-    """bfloat16 state dicts hash without error and deterministically."""
-    torch.manual_seed(0)
-    model = nn.Linear(4, 3).to(torch.bfloat16)
-    with pytest.raises(TypeError):
-        _legacy_hash_model(model)  # numpy has no bfloat16 — this is the case being fixed
-    first = hash_model(model)
-    assert len(first) == 64
-    assert hash_model(model) == first
+    dtypes = (torch.float16, torch.float32, torch.float64, torch.int64, torch.int32, torch.uint8, torch.bool)
+    for dtype in dtypes:
+        transposed = torch.arange(6).reshape(2, 3).T.to(dtype)
+        assert not transposed.is_contiguous()
+        for values in (torch.tensor(1, dtype=dtype), transposed):
+            model = nn.Module()
+            model.register_buffer("values", values)
+            assert hash_model(model) == _legacy_hash_model(model), (dtype, values.shape)
 
 
 def test_hash_model_distinguishes_weights(linear_model: nn.Module) -> None:
@@ -185,3 +173,22 @@ def test_wrapper_prefixes_are_stripped_and_weights_load() -> None:
         fresh = _Encoder()
         fresh.load_state_dict(state_dict)  # strict: fails on any mangled or leftover key
         assert torch.equal(fresh.submodule.weight, inner.submodule.weight)
+
+
+def test_bfloat16_weights_and_buffers_are_hashed_without_numpy_dtype_support() -> None:
+    model = nn.Linear(2, 1, bias=False, dtype=torch.bfloat16)
+    model.register_buffer("scale", torch.tensor(1.0, dtype=torch.bfloat16))
+    with pytest.raises(TypeError):
+        _legacy_hash_model(model)
+    first = hash_model(model)
+    assert len(first) == 64
+    assert hash_model(model) == first
+
+    attack_id = hash_attack({"attack": "test"}, model)
+    with torch.no_grad():
+        model.weight.add_(1.0)
+    after_weight_change = hash_model(model)
+    assert after_weight_change != first
+    assert hash_attack({"attack": "test"}, model) != attack_id
+    model.scale.add_(1.0)
+    assert hash_model(model) != after_weight_change

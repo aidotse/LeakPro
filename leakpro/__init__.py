@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     # Visible to type checkers (so `from leakpro import LeakPro` resolves) but
     # not executed at runtime, keeping the lazy-import contract intact.
+    from .input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler  # noqa: F401
     from .input_handler.abstract_input_handler import AbstractInputHandler  # noqa: F401
     from .leakpro import LeakPro  # noqa: F401
 
@@ -29,6 +30,10 @@ def __getattr__(name: str) -> object:
         from .input_handler.abstract_input_handler import AbstractInputHandler  # noqa: PLC0415
 
         return AbstractInputHandler
+    if name == "AbstractExtractionInputHandler":
+        from .input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler  # noqa: PLC0415
+
+        return AbstractExtractionInputHandler
     if name == "LeakPro":
         from .leakpro import LeakPro  # noqa: PLC0415
 
@@ -36,7 +41,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module 'leakpro' has no attribute {name!r}")
 
 
-__all__ = ["AbstractInputHandler", "LeakPro"]
+__all__ = ["AbstractExtractionInputHandler", "AbstractInputHandler", "LeakPro"]
 
 
 # Best-effort platform banner on first import. Wrapped in a broad try/except so

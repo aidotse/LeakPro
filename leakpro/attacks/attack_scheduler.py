@@ -56,20 +56,27 @@ class AttackScheduler:
 
         # Create factory
         attack_type = configs.audit.attack_type
+        self.attack_type = attack_type
         self._initialize_factory(attack_type)
 
-        self.attack_names = [entry["attack"] for entry in configs.audit.attack_list]
-        self.attack_configs = [{k: v for k, v in entry.items() if k != "attack"} for entry in configs.audit.attack_list]
-
         self.attacks = []
-        for attack_name, attack_config in zip(self.attack_names, self.attack_configs):
+        self.attack_names = []
+        self.attack_configs = []
+        for position, entry in enumerate(configs.audit.attack_list, start=1):
+            attack_config = entry.copy()
+            attack_name = attack_config.pop("attack", None)
+            if not isinstance(attack_name, str) or not attack_name.strip():
+                logger.warning("Skipping audit entry %d because it has no valid attack name.", position)
+                continue
             try:
                 attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
                 self.add_attack(attack)
+                self.attack_names.append(attack_name)
+                self.attack_configs.append(attack_config)
                 logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
-                logger.info(e)
-                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                logger.warning("Failed to create attack: %s. Skipping this entry. %s (supported attacks: %s)",
+                               attack_name, e, ", ".join(self.attack_factory.attack_classes))
 
         # Read all previous hashed attack objects from the report directory
         self.output_dir = output_dir
@@ -114,9 +121,18 @@ class AttackScheduler:
                 logger.error("Failed to import MINV attack module.")
                 raise ImportError("MINV attack module is not available.") from e
 
+        elif attack_type == "extraction":
+            try:
+                from leakpro.attacks.extraction_attacks.attack_factory_extraction import AttackFactoryExtraction  # noqa: I001, PLC0415, E501
+                self.attack_factory = AttackFactoryExtraction
+                logger.info("Extraction attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import extraction attack module.")
+                raise ImportError("Extraction attack module is not available.") from e
+
         else:
-            logger.error(f"Unsupported attack type: {self.attack_type}")
-            raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
+            logger.error(f"Unsupported attack type: {attack_type}")
+            raise ValueError(f"Unsupported attack type: {attack_type}.")
 
     def add_attack(self:Self, attack: Any) -> None:
         """Add an attack to the list of attacks."""
@@ -124,6 +140,8 @@ class AttackScheduler:
 
     def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
+        if self.attack_type == "extraction":
+            self._preflight_extraction_results()
         results = []
         for attack_obj, attack_type in zip(self.attacks, self.attack_names):
             # Re-seed before every attack so each attack sees the same random state
@@ -153,6 +171,21 @@ class AttackScheduler:
             results.append({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result})
 
         return results
+
+    def _preflight_extraction_results(self: Self) -> None:
+        """Reject known output collisions before preparing or running extraction attacks."""
+        result_ids = [attack.result_id for attack in self.attacks]
+        duplicate_ids = sorted({result_id for result_id in result_ids if result_ids.count(result_id) > 1})
+        if duplicate_ids:
+            raise ValueError(f"Duplicate extraction result IDs in one audit: {duplicate_ids}")
+        for attack in self.attacks:
+            if attack.config.overwrite_results:
+                continue
+            if (self.report_dir / attack.result_id).exists() or (self.data_object_dir / f"{attack.result_id}.json").exists():
+                raise FileExistsError(
+                    f"Extraction result {attack.result_id!r} already exists. "
+                    "Set overwrite_results=true to replace it."
+                )
 
     def map_setting_to_attacks(self:Self) -> None:
         """Identify relevant attacks based on adversary setting."""
