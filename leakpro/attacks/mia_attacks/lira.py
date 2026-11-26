@@ -4,7 +4,8 @@
 #
 """Implementation of the LiRA attack."""
 
-from typing import Literal
+from collections.abc import Iterator
+from typing import Literal, Optional
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,6 +13,7 @@ from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.robustness import RobustnessConfig, save_robustness_results
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
@@ -104,6 +106,7 @@ class AttackLiRA(AbstractMIA):
         It selects a balanced subset of data samples from in-group and out-group members
         of the audit dataset, prepares the data for evaluation, and computes the configured
         signal for both shadow models and the target model.
+
         """
 
         # Fixed variance is used when the number of shadow models is below 32 (64, IN and OUT models)
@@ -129,7 +132,7 @@ class AttackLiRA(AbstractMIA):
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
         # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
         true_labels = self.handler.get_labels(self.audit_dataset["data"])
-        target_logits = ShadowModelHandler().load_logits(name="target")
+        target_logits = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
         # Classification labels arrive with a spurious singleton axis (e.g. (N, 1)) that must be
         # dropped before rescaled_logits/loss index them as (N,). Forecasting targets, though,
         # already match the cached logits' shape (N, horizon, num_variables) — squeezing them
@@ -147,6 +150,7 @@ class AttackLiRA(AbstractMIA):
             )
         self.shadow_models_signals = np.array(self.shadow_models_signals)
 
+        self._unfiltered_signals = (self.target_signals, self.shadow_models_signals)
         self._drop_unscorable_audit_points()
 
     def _drop_unscorable_audit_points(self:Self) -> None:
@@ -225,7 +229,8 @@ class AttackLiRA(AbstractMIA):
             )
         return signal_values
 
-    def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
+    def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str,
+                num_references: Optional[int] = None) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""
 
         # Fixed/Global variance calculation.
@@ -234,7 +239,8 @@ class AttackLiRA(AbstractMIA):
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         if var_calculation == "carlini":
-            return self._carlini_variance(signals, mask, is_in)
+            return self._carlini_variance(signals, mask, is_in,
+                                          self.num_shadow_models if num_references is None else num_references)
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         #   but check IN and OUT samples individualy
@@ -248,9 +254,9 @@ class AttackLiRA(AbstractMIA):
             return np.array([None])
         return np.std(signals[mask])
 
-    def _carlini_variance(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
-        if self.num_shadow_models >= self.fix_var_threshold*2:
-                return np.std(signals[mask])
+    def _carlini_variance(self:Self, signals: list, mask: list, is_in: bool, num_references: int) -> np.ndarray:
+        if num_references >= self.fix_var_threshold * 2:
+            return np.std(signals[mask])
         if is_in:
             return self.fixed_in_std
         return self.fixed_out_std
@@ -275,42 +281,7 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_signals.shape[1]
-        score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
-
-        self.fixed_in_std = self.get_std(self.shadow_models_signals.flatten(), (~self.out_indices).flatten(), True, "fixed")
-        self.fixed_out_std = self.get_std(self.shadow_models_signals.flatten(), self.out_indices.flatten(), False, "fixed")
-
-        # Iterate over and extract signals for IN and OUT shadow models for each audit sample
-        for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing audit samples"):
-
-            # Calculate the mean for OUT shadow model signals
-            out_mask = self.out_indices[:,i]
-            sm_signals = self.shadow_models_signals[:,i]
-
-            out_mean = np.mean(sm_signals[out_mask])
-            out_std = self.get_std(sm_signals, out_mask, False, self.var_calculation)
-
-            # Get the signal from the target model for the current sample
-            target_signal = self.target_signals[i]
-
-            # Calculate the log probability density function value
-            if self.online:
-                in_mean = np.mean(sm_signals[~out_mask])
-                in_std = self.get_std(sm_signals, ~out_mask, True, self.var_calculation)
-
-                pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
-                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
-            else:
-                # Offline attack scores by how unlikely the target signal is under the
-                # OUT distribution, matching the reference implementation
-                # (tensorflow/privacy mi_lira_2021: score = logpdf(out), negated at ROC time).
-                pr_in = 0
-                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
-
-            score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
-            if np.isnan(score[i]):
-                raise ValueError("Score is NaN")
+        score = self._score_signals(self.target_signals, self.shadow_models_signals, self.out_indices)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training).
         # Set by _drop_unscorable_audit_points, which renumbers them if any point was dropped.
@@ -333,3 +304,75 @@ class AttackLiRA(AbstractMIA):
                                     result_name="LiRA",
                                     metadata=self.configs.model_dump(),
                                     audit_indices=self.scored_population_indices(self.kept_audit_points))
+
+    def _score_signals(self, target_signals: np.ndarray, shadow_signals: np.ndarray,
+                       out_indices: np.ndarray) -> np.ndarray:
+        """Apply the same LiRA calculation to ordinary or rotated signal arrays."""
+        n_audit_samples = shadow_signals.shape[1]
+        score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
+
+        self.fixed_in_std = self.get_std(shadow_signals.flatten(), (~out_indices).flatten(), True, "fixed")
+        self.fixed_out_std = self.get_std(shadow_signals.flatten(), out_indices.flatten(), False, "fixed")
+
+        # Iterate over and extract signals for IN and OUT shadow models for each audit sample
+        for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing audit samples"):
+
+            # Calculate the mean for OUT shadow model signals
+            out_mask = out_indices[:,i]
+            sm_signals = shadow_signals[:,i]
+
+            out_mean = np.mean(sm_signals[out_mask])
+            out_std = self.get_std(sm_signals, out_mask, False, self.var_calculation, len(shadow_signals))
+
+            # Get the signal from the target model for the current sample
+            target_signal = target_signals[i]
+
+            # Calculate the log probability density function value
+            if self.online:
+                in_mean = np.mean(sm_signals[~out_mask])
+                in_std = self.get_std(sm_signals, ~out_mask, True, self.var_calculation, len(shadow_signals))
+
+                pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
+                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
+            else:
+                # Offline attack scores by how unlikely the target signal is under the
+                # OUT distribution, matching the reference implementation
+                # (tensorflow/privacy mi_lira_2021: score = logpdf(out), negated at ROC time).
+                pr_in = 0
+                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
+
+            score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
+            if np.isnan(score[i]):
+                raise ValueError("Score is NaN")
+
+        return score
+
+    def run_robustness(self, n_runs: Optional[int] = None, seed: Optional[int] = None,
+                       output_dir: Optional[str] = None) -> list[MIAResult]:
+        """Prepare once, then rotate cached signals and recompute LiRA's reference groups.
+
+        Each target uses its recorded training indices and is excluded from its
+        references. Reference filtering and Gaussian statistics are recomputed.
+        """
+        config = RobustnessConfig(n_runs=n_runs, seed=seed)
+        config.validate_attack(self)
+        self.prepare_attack()
+        metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
+        training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
+        membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])
+        training_sizes = [len(indices) for indices in training_indices]
+        target, shadows = self._unfiltered_signals
+        signals = np.concatenate((target[None], shadows))
+        references_by_target = config.reference_models(self.attack_data_indices, training_indices)
+
+        def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
+            for target, references in references_by_target.items():
+                out_indices = ~membership[references]
+                kept = audit_points_with_reference_models(out_indices, require_in_models=self.online)
+                if not kept.all():
+                    logger.warning(f"LiRA robustness: dropping {int((~kept).sum())} points without required reference models")
+                scores = self._score_signals(signals[target, kept], signals[references][:, kept], out_indices[:, kept])
+                yield target, references, scores, kept
+
+        return save_robustness_results(self, {"audit": signals}, membership, training_sizes,
+                                       references_by_target, rotations(), seed, output_dir)

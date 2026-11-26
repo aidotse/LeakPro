@@ -216,7 +216,7 @@ class MIAHandler:
         # Overwrite with parameters that are relevant to the loss function
         self.target_model_metadata.criterion = LossConfig(name=criterion_config.name, params=criterion_config.params)
 
-        self._criterion = loss_cls(**criterion_config.params)  # Instantiate the loss function
+        self._criterion = loss_cls(**(criterion_config.params or {}))  # Instantiate the loss function
 
     def _load_dataloader_params(self:Self) -> None:
         dataloader_config = self.target_model_metadata.data_loader
@@ -409,7 +409,7 @@ class MIAHandler:
 
         # Filter params to only include valid ones
         filtered_params = {
-            k: v for k, v in optimizer_config.params.items() if k in valid_args
+            k: v for k, v in (optimizer_config.params or {}).items() if k in valid_args
         }
 
         return optimizer_cls(model.parameters(), **filtered_params)

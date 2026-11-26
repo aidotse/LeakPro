@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
 from leakpro.risk.schemas import UseCaseProfile
-from leakpro.utils.seed import MAX_SEED
+from leakpro.utils.seed import DEFAULT_AUDIT_SEED, MAX_SEED
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
@@ -72,7 +72,7 @@ class ReconstructionConfig(BaseModel):
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
-    random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
+    random_seed: int = Field(default=DEFAULT_AUDIT_SEED, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
@@ -213,6 +213,8 @@ class ShadowModelTrainingSchema(BaseModel):
     model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")
     population_hash: Optional[str] = Field(default=None, description="Hash of train/test index split")
+    sampling_method: Optional[str] = Field(default=None, description="How training records were selected")
+    sampler_hash: Optional[str] = Field(default=None, description="Identity of a custom shadow sampler")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
@@ -339,6 +341,9 @@ class MIAResultSchema(BaseModel):
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
     bootstrap: Optional[Dict[str, Any]] = Field(
         None, description="Optional bootstrap mean/CI for roc_auc and the fixed-FPR table (see MIAResult.bootstrap_metrics)"
+    )
+    robustness: Optional[Dict[str, Any]] = Field(
+        None, description="Empirical rotated-target summary; percentiles are not calibrated confidence intervals"
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

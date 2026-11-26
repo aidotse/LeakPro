@@ -4,14 +4,12 @@
 #
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
-from collections.abc import Mapping
 from pathlib import Path
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.schemas import AuditConfig
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
-from leakpro.utils.seed import MAX_SEED, seed_everything
+from leakpro.utils.seed import get_audit_seed, seed_everything
 
 
 class AttackScheduler:
@@ -34,42 +32,42 @@ class AttackScheduler:
         """
         configs = handler.configs
 
-        # Seed once at audit start so attack construction (e.g. audit-data sampling)
-        # is reproducible. Non-int guard keeps DotMap-based configs working: a DotMap
-        # yields an empty DotMap for a missing key instead of raising. A value that is
-        # present but not an int is a config error, so it warns rather than defaulting
-        # silently. The same goes for an int outside [0, MAX_SEED], which would otherwise
-        # crash np.random.seed() inside seed_everything().
-        seed = getattr(configs.audit, "random_seed", None)
-        default_seed = AuditConfig.model_fields["random_seed"].default
-        if isinstance(seed, int) and not isinstance(seed, bool) and 0 <= seed <= MAX_SEED:
-            self.random_seed = seed
-        else:
-            seed_is_absent = seed is None or (isinstance(seed, Mapping) and len(seed) == 0)
-            if not seed_is_absent:
-                logger.warning(
-                    f"audit.random_seed={seed!r} is not an integer in [0, {MAX_SEED}]; "
-                    f"falling back to the default seed {default_seed}."
-                )
-            self.random_seed = default_seed
+        self.random_seed = get_audit_seed(configs.audit)
         seed_everything(self.random_seed)
 
         # Create factory
         attack_type = configs.audit.attack_type
+        if attack_type != "mia" and any(entry.get("robustness") is not None for entry in configs.audit.attack_list):
+            raise ValueError("robustness is only supported for MIA attacks")
         self._initialize_factory(attack_type)
 
-        self.attack_names = [entry["attack"] for entry in configs.audit.attack_list]
-        self.attack_configs = [{k: v for k, v in entry.items() if k != "attack"} for entry in configs.audit.attack_list]
-
+        self.attack_names = []
+        self.attack_configs = []
         self.attacks = []
-        for attack_name, attack_config in zip(self.attack_names, self.attack_configs):
-            try:
+        self.robustness_options = {}
+        for entry in configs.audit.attack_list:
+            attack_name = entry["attack"]
+            attack_config = {key: value for key, value in entry.items() if key not in {"attack", "robustness"}}
+            if entry.get("robustness") is not None:
+                from leakpro.attacks.robustness import RobustnessConfig  # noqa: PLC0415
+
+                config = RobustnessConfig.model_validate(entry["robustness"])
+                options = config.model_dump(exclude_unset=True)
+                options.setdefault("seed", self.random_seed)
                 attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
-                self.add_attack(attack)
-                logger.info(f"Added attack: {attack_name}")
-            except ValueError as e:
-                logger.info(e)
-                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                config.validate_attack(attack)
+                self.robustness_options[attack] = options
+            else:
+                try:
+                    attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
+                except ValueError as e:
+                    logger.info(e)
+                    logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                    continue
+            self.add_attack(attack)
+            self.attack_names.append(attack_name)
+            self.attack_configs.append(attack_config)
+            logger.info(f"Added attack: {attack_name}")
 
         # Read all previous hashed attack objects from the report directory
         self.output_dir = output_dir
@@ -123,12 +121,22 @@ class AttackScheduler:
         self.attacks.append(attack)
 
     def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
-        """Run the attacks and return the results."""
+        """Run attacks, returning one result per target for robustness entries.
+
+        Robustness entries retain the actual attack object and each run's
+        target/reference provenance in metadata. Normal entries keep their existing contract.
+        The Optuna flag applies only to ordinary entries.
+        """
         results = []
         for attack_obj, attack_type in zip(self.attacks, self.attack_names):
             # Re-seed before every attack so each attack sees the same random state
             # regardless of which earlier attacks ran or were loaded from cache.
             seed_everything(self.random_seed)
+            if attack_obj in self.robustness_options:
+                results.extend({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result}
+                               for result in attack_obj.run_robustness(output_dir=self.output_dir,
+                                                                      **self.robustness_options[attack_obj]))
+                continue
             run_with_optuna = use_optuna and attack_obj.optuna_params > 0
 
             # If Optuna is used, the attack should not be loaded even if it already exists

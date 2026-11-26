@@ -40,6 +40,14 @@ def test_import_module_registers_and_reuses_same_module(tmp_path: Path) -> None:
     assert get_class_from_module(module_a, "DemoClass") is module_a.DemoClass
 
 
+def test_changed_source_is_loaded_in_same_process(tmp_path: Path) -> None:
+    path = _write_module(tmp_path, "edited_module.py", "VALUE = 1")
+    first = import_module_from_file(str(path))
+    path.write_text("VALUE = 2")
+    assert first.VALUE == 1
+    assert import_module_from_file(str(path)).VALUE == 2
+
+
 def test_import_module_same_name_different_path_replaces_sys_modules(tmp_path: Path) -> None:
     dir_a = tmp_path / "a"
     dir_b = tmp_path / "b"

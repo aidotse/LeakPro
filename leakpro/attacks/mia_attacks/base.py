@@ -4,12 +4,16 @@
 #
 """Implementation of the BASE attack."""
 
+from collections.abc import Iterator
+from typing import Optional
+
 import numpy as np
 from pydantic import BaseModel, Field
 from scipy.special import logsumexp
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.robustness import RobustnessConfig, save_robustness_results
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -99,6 +103,7 @@ class AttackBASE(AbstractMIA):
         """Prepare data needed for running the attack on the target model and dataset.
 
         Signals are computed on the auxiliary model(s) and dataset.
+
         """
         logger.info("Preparing shadow models for BASE attack")
 
@@ -174,21 +179,11 @@ class AttackBASE(AbstractMIA):
             logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze(axis=0) )
         log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_sm])
 
-        if self.online is True:
-            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
-        else:
-            # get what shadow models have seen the audit indices
+        out_indices = None
+        if not self.online:
             index_map = np.array([np.where(self.audit_dataset["data"] == val)[0][0] for val in audit_indices])
-            out_indices_audit = self.out_indices[:, index_map]
-            n_out_models = np.sum(out_indices_audit, axis=0)
-            self._check_out_models_available(n_out_models)
-            # make the "in-model" logits -inf so they are not included in the logsumexp
-            out_logits = np.where(out_indices_audit, log_conf_shadow_models, -np.inf)
-            threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
-
-        score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
-
-        return score  # noqa: RET504
+            out_indices = self.out_indices[:, index_map]
+        return self._score_signals(log_conf_target, log_conf_shadow_models, out_indices)
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
@@ -203,29 +198,8 @@ class AttackBASE(AbstractMIA):
         attack_info = f"Running {online_or_offline} BASE attack with {self.num_shadow_models} shadow models"
         logger.info(attack_info)
 
-        # Load the logits for the target model and shadow models
-        ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        logits_target = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-        logits_shadow_models = []
-        for indx in self.shadow_model_indices:
-            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
-
-        # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
-
-        # run points through shadow models and collect the log confidence values
-        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_shadow_models])
-
-        if self.online is True:
-            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
-        else:
-            n_out_models = np.sum(self.out_indices, axis=0)
-            self._check_out_models_available(n_out_models)
-
-            out_logits = np.where(self.out_indices, log_conf_shadow_models, -np.inf)
-            threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
-
-        score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
+        signals = self._get_cached_signals()
+        score = self._score_signals(signals[0], np.asarray(signals[1:]), self.out_indices if not self.online else None)
 
         # pick out the in-members and out-members signals
         in_members = self.audit_dataset["in_members"]
@@ -243,3 +217,50 @@ class AttackBASE(AbstractMIA):
                                     result_name="BASE",
                                     metadata=self.configs.model_dump(),
                                     audit_indices=self.scored_population_indices())
+
+    def _get_cached_signals(self) -> list[np.ndarray]:
+        """Keep each model's native precision until its role in the evaluation is known."""
+        pool = ShadowModelHandler()
+        labels = self.handler.get_labels(self.audit_dataset["data"])
+        target = pool.load_logits(name=f"target_{pool.target_model_hash}")
+        return [self._log_conf(target, labels),
+                *[self._log_conf(pool.load_logits(indx=index), labels) for index in self.shadow_model_indices]]
+
+    def _score_signals(self, log_conf_target: np.ndarray, log_conf_shadow_models: np.ndarray,
+                       out_indices: np.ndarray) -> np.ndarray:
+        """Evaluate BASE on the supplied target and reference log confidences."""
+        if self.online is True:
+            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(len(log_conf_shadow_models))
+        else:
+            n_out_models = np.sum(out_indices, axis=0)
+            self._check_out_models_available(n_out_models)
+
+            out_logits = np.where(out_indices, log_conf_shadow_models, -np.inf)
+            threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
+
+        return log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
+
+    def run_robustness(self, n_runs: Optional[int] = None, seed: Optional[int] = None,
+                       output_dir: Optional[str] = None) -> list[MIAResult]:
+        """Rotate cached log confidences and OUT masks through BASE's ordinary scorer.
+
+        Every target is excluded from its references and uses its recorded membership.
+        """
+        config = RobustnessConfig(n_runs=n_runs, seed=seed)
+        config.validate_attack(self)
+        self.prepare_attack()
+        metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
+        training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
+        membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])
+        training_sizes = [len(indices) for indices in training_indices]
+        signals = self._get_cached_signals()
+        references_by_target = config.reference_models(self.attack_data_indices, training_indices)
+
+        def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
+            for target, references in references_by_target.items():
+                reference_signals = np.asarray([signals[index] for index in references])
+                scores = self._score_signals(signals[target], reference_signals, ~membership[references])
+                yield target, references, scores, np.ones(len(scores), dtype=bool)
+
+        return save_robustness_results(self, {str(i): row for i, row in enumerate(signals)}, membership, training_sizes,
+                                       references_by_target, rotations(), seed, output_dir)
